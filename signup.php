@@ -17,12 +17,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
   $check_result = mysqli_stmt_get_result($check_stmt);
 
   if (mysqli_num_rows($check_result) == 0) {
-    $query = "INSERT INTO users (username, password, email) VALUES (?, ?, ?)";
+    $query = "INSERT INTO users (email, username, password) VALUES (?, ?, ?)";
     $stmt = mysqli_prepare($conn, $query);
     if ($stmt === false) {
       die("Prepare failed: " . mysqli_error($conn));
     }
-    mysqli_stmt_bind_param($stmt, "sss", $username, $password, $email);
+    mysqli_stmt_bind_param($stmt, "sss", $email, $username, $password);
     if (mysqli_stmt_execute($stmt)) {
       $_SESSION["username"] = $username;
       header("Location: index.php");
