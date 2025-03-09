@@ -1,3 +1,49 @@
+<?php
+session_start(); // Start the session
+require "config.php";
+
+$signInError = "";
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST["signInSubmit"])) {
+  $username = trim($_POST["username"] ?? '');
+  $password = trim($_POST["password"] ?? '');
+
+  if (empty($username) || empty($password)) {
+    $signInError = "Please fill in all fields.";
+  } else {
+    // Debug: Log the query
+    error_log("Sign-in query for username: $username");
+    $stmt = $conn->prepare("SELECT id, username, password FROM users WHERE username = ? COLLATE UTF8_GENERAL_CI");
+    if ($stmt === false) {
+      $signInError = "Database preparation failed: " . $conn->error;
+      error_log("Database error: " . $conn->error);
+    } else {
+      $stmt->bind_param("s", $username);
+      $stmt->execute();
+      $result = $stmt->get_result();
+
+      if ($result->num_rows == 1) {
+        $user = $result->fetch_assoc();
+        if (password_verify($password, $user["password"])) {
+          $_SESSION["user_id"] = $user["id"];
+          $_SESSION["username"] = $user["username"];
+          $_SESSION["logged_in"] = true;
+          header("Location: index.php");
+          exit;
+        } else {
+          $signInError = "Invalid password.";
+          error_log("Invalid password for username: $username");
+        }
+      } else {
+        $signInError = "User not found.";
+        error_log("No user found for username: $username");
+      }
+      $stmt->close();
+    }
+  }
+  $conn->close();
+}
+?>
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -17,11 +63,54 @@
     .form-control { background-color: #3a3a3a; border: none; color: #fff; }
     .form-control:focus { background-color: #3a3a3a; color: #fff; }
     .section-title { margin-bottom: 10px; font-size: 1.5rem; }
-    .scroll-container { display: flex; overflow-x: auto; padding-bottom: 10px; scrollbar-width: thin; }
-    .scroll-container::-webkit-scrollbar { height: 8px; }
-    .scroll-container::-webkit-scrollbar-thumb { background: #ff0000; border-radius: 10px; }
-    .scroll-item { flex: 0 0 auto; margin-right: 15px; }
-    .scroll-item img { width: 200px; height: 300px; object-fit: cover; border-radius: 5px; }
+    .scroll-container {
+      display: flex;
+      overflow-x: auto;
+      padding-bottom: 10px;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+      cursor: grab;
+    }
+    .scroll-container::-webkit-scrollbar {
+      display: none;
+    }
+    .scroll-container.active {
+      cursor: grabbing;
+    }
+    .scroll-item {
+      flex: 0 0 auto;
+      margin-right: 15px;
+      user-select: none;
+    }
+    .scroll-item img {
+      width: 200px;
+      height: 300px;
+      object-fit: cover;
+      border-radius: 5px;
+      pointer-events: none;
+    }
+    .username-nav {
+      color: #fff;
+      font-weight: bold;
+      text-decoration: none;
+      padding: 0.5rem 1rem;
+      background: none;
+    }
+    .username-nav:hover {
+      color: #ff0000;
+    }
+    .dropdown-menu {
+      background-color: #2a2a2a;
+      border: none;
+    }
+    .dropdown-item {
+      color: #fff;
+    }
+    .dropdown-item:hover {
+      background-color: #3a3a3a;
+      color: #ff0000;
+    }
+    .error { color: #ff0000; margin-top: 10px; }
   </style>
 </head>
 <body>
@@ -33,13 +122,24 @@
       </button>
       <div class="collapse navbar-collapse" id="navbarNav">
         <ul class="navbar-nav ms-auto">
-           <li class="nav-item"><a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'index.php' ? 'active' : ''; ?>" href="index.php">Home</a></li>
-           <li class="nav-item"><a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'movies.php' ? 'active' : ''; ?>" href="movies.php">Movies</a></li>
-           <li class="nav-item"><a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'tv-series.php' ? 'active' : ''; ?>" href="tv-series.php">TV Series</a>
-           </li>
-           <li class="nav-item"><a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'search.php' ? 'active' : ''; ?>" href="search.php">Search</a></li>
-           <li class="nav-item"><a class="nav-link btn btn-red" href="#" data-bs-toggle="modal" data-bs-target="#signModal">Sign In</a></li>
-           </ul>
+          <li class="nav-item"><a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'index.php' ? 'active' : ''; ?>" href="index.php">Home</a></li>
+          <li class="nav-item"><a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'movies.php' ? 'active' : ''; ?>" href="movies.php">Movies</a></li>
+          <li class="nav-item"><a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'tv-series.php' ? 'active' : ''; ?>" href="tv-series.php">TV Series</a></li>
+          <li class="nav-item"><a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'search.php' ? 'active' : ''; ?>" href="search.php">Search</a></li>
+          <?php if (isset($_SESSION["logged_in"]) && $_SESSION["logged_in"] === true): ?>
+            <li class="nav-item dropdown">
+              <a class="username-nav dropdown-toggle" href="#" id="accountDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                <?php echo htmlspecialchars($_SESSION["username"]); ?>
+              </a>
+              <ul class="dropdown-menu" aria-labelledby="accountDropdown">
+                <li><a class="dropdown-item" href="profile.php">Profile</a></li>
+                <li><a class="dropdown-item" href="logout.php">Log Out</a></li>
+              </ul>
+            </li>
+          <?php else: ?>
+            <li class="nav-item"><a class="nav-link btn btn-red" href="#" data-bs-toggle="modal" data-bs-target="#signInModal">Sign In</a></li>
+          <?php endif; ?>
+        </ul>
       </div>
     </div>
   </nav>
@@ -48,14 +148,12 @@
     <h2 class="section-title">POPULAR MOVIES</h2>
     <div class="scroll-container">
       <?php
-      require "config.php";
-     // Popular Movies
       $url = "https://api.themoviedb.org/3/movie/popular?api_key=$tmdb_api_key";
       $response = getCachedApiResponse($url);
       $movies = json_decode($response, true)["results"];
       foreach ($movies as $movie) {
         echo '<div class="scroll-item">';
-        echo '<img src="https://image.tmdb.org/t/p/w500' . $movie["poster_path"] . '" alt="' . $movie["title"] . '" loading="lazy">';
+        echo '<img src="https://image.tmdb.org/t/p/w500' . $movie["poster_path"] . '" alt="' . htmlspecialchars($movie["title"]) . '" loading="lazy">';
         echo '</div>';
       }
       ?>
@@ -64,13 +162,12 @@
     <h2 class="section-title">POPULAR SERIES</h2>
     <div class="scroll-container">
       <?php
-     // Popular Series
       $url = "https://api.themoviedb.org/3/tv/popular?api_key=$tmdb_api_key";
       $response = getCachedApiResponse($url);
       $series = json_decode($response, true)["results"];
       foreach ($series as $show) {
         echo '<div class="scroll-item">';
-        echo '<img src="https://image.tmdb.org/t/p/w500' . $show["poster_path"] . '" alt="' . $show["name"] . '" loading="lazy">';
+        echo '<img src="https://image.tmdb.org/t/p/w500' . $show["poster_path"] . '" alt="' . htmlspecialchars($show["name"]) . '" loading="lazy">';
         echo '</div>';
       }
       ?>
@@ -79,13 +176,12 @@
     <h2 class="section-title">TOP RATED MOVIES</h2>
     <div class="scroll-container">
       <?php
-      // Top Rated Movies
-        $url = "https://api.themoviedb.org/3/movie/top_rated?api_key=$tmdb_api_key";
-        $response = getCachedApiResponse($url);
-        $topMovies = json_decode($response, true)["results"];
+      $url = "https://api.themoviedb.org/3/movie/top_rated?api_key=$tmdb_api_key";
+      $response = getCachedApiResponse($url);
+      $topMovies = json_decode($response, true)["results"];
       foreach ($topMovies as $movie) {
         echo '<div class="scroll-item">';
-        echo '<img src="https://image.tmdb.org/t/p/w500' . $movie["poster_path"] . '" alt="' . $movie["title"] . '" loading="lazy">';
+        echo '<img src="https://image.tmdb.org/t/p/w500' . $movie["poster_path"] . '" alt="' . htmlspecialchars($movie["title"]) . '" loading="lazy">';
         echo '</div>';
       }
       ?>
@@ -94,66 +190,133 @@
     <h2 class="section-title">TOP RATED SERIES</h2>
     <div class="scroll-container">
       <?php
-     // Top Rated Series
       $url = "https://api.themoviedb.org/3/tv/top_rated?api_key=$tmdb_api_key";
       $response = getCachedApiResponse($url);
       $topSeries = json_decode($response, true)["results"];
       foreach ($topSeries as $show) {
         echo '<div class="scroll-item">';
-        echo '<img src="https://image.tmdb.org/t/p/w500' . $show["poster_path"] . '" alt="' . $show["name"] . '" loading="lazy">';
+        echo '<img src="https://image.tmdb.org/t/p/w500' . $show["poster_path"] . '" alt="' . htmlspecialchars($show["name"]) . '" loading="lazy">';
         echo '</div>';
       }
       ?>
     </div>
 
-    <!-- Sign In/Sign Up Modal -->
-<div class="modal fade" id="signModal" tabindex="-1" aria-labelledby="signModalLabel" aria-hidden="true">
-  <div class="modal-dialog">
-    <div class="modal-content sign-box">
-      <div class="modal-header">
-        <h5 class="modal-title" id="signModalLabel">iWatch</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+    <!-- Sign In Modal -->
+    <div class="modal fade" id="signInModal" tabindex="-1" aria-labelledby="signInModalLabel" aria-hidden="true">
+      <div class="modal-dialog">
+        <div class="modal-content sign-box">
+          <div class="modal-header">
+            <h5 class="modal-title" id="signInModalLabel">iWatch - Sign In</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <form method="POST" action="" id="signInForm">
+              <?php if ($signInError): ?>
+                <div class="error"><?php echo $signInError; ?></div>
+              <?php endif; ?>
+              <div class="mb-3">
+                <input type="text" class="form-control" name="username" placeholder="Username" required value="<?php echo htmlspecialchars($_POST["username"] ?? ''); ?>">
+              </div>
+              <div class="mb-3">
+                <input type="password" class="form-control" name="password" placeholder="Password" required>
+              </div>
+              <button type="submit" name="signInSubmit" class="btn btn-red w-100">Sign In</button>
+            </form>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            <a href="#" data-bs-toggle="modal" data-bs-target="#signUpModal" data-bs-dismiss="modal">Need an account? Sign Up</a>
+          </div>
+        </div>
       </div>
-      <div class="modal-body">
-        <form method="POST" action="signin.php" id="signInForm">
-          <div class="mb-3">
-            <input type="text" class="form-control" name="username" placeholder="Username" required>
+    </div>
+
+    <!-- Sign Up Modal -->
+    <div class="modal fade" id="signUpModal" tabindex="-1" aria-labelledby="signUpModalLabel" aria-hidden="true">
+      <div class="modal-dialog">
+        <div class="modal-content sign-box">
+          <div class="modal-header">
+            <h5 class="modal-title" id="signUpModalLabel">iWatch - Sign Up</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
           </div>
-          <div class="mb-3">
-            <input type="password" class="form-control" name="password" placeholder="Password" required>
+          <div class="modal-body">
+            <form method="POST" action="signup.php" id="signUpForm">
+              <div class="mb-3">
+                <input type="text" class="form-control" name="username" placeholder="Username" required>
+              </div>
+              <div class="mb-3">
+                <input type="password" class="form-control" name="password" placeholder="Password" required>
+              </div>
+              <div class="mb-3">
+                <input type="email" class="form-control" name="email" placeholder="Email" required>
+              </div>
+              <button type="submit" class="btn btn-red w-100">Sign Up</button>
+            </form>
           </div>
-          <button type="submit" class="btn btn-red w-100">Sign In</button>
-        </form>
-        <form method="POST" action="signup.php" id="signUpForm" style="display:none;">
-        <div class="mb-3">
-            <input type="email" class="form-control" name="email" placeholder="Email" required>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            <a href="#" data-bs-toggle="modal" data-bs-target="#signInModal" data-bs-dismiss="modal">Already have an account? Sign In</a>
           </div>
-          <div class="mb-3">
-            <input type="text" class="form-control" name="username" placeholder="Username" required>
-          </div>
-          <div class="mb-3">
-            <input type="password" class="form-control" name="password" placeholder="Password" required>
-          </div>
-          
-          <button type="submit" class="btn btn-red w-100">Sign Up</button>
-        </form>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-        <button type="button" class="btn btn-link" id="toggleSignUp">Sign Up</button>
+        </div>
       </div>
     </div>
   </div>
-</div>
+
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script>
-    document.getElementById('toggleSignUp').addEventListener('click', function() {
-      document.getElementById('signInForm').style.display = 'none';
-      document.getElementById('signUpForm').style.display = 'block';
-    });
-    document.getElementById('signModal').addEventListener('show.bs.modal', function() {
-      document.getElementById('signInForm').style.display = 'block';
-      document.getElementById('signUpForm').style.display = 'none';
+    const scrollContainers = document.querySelectorAll('.scroll-container');
+    scrollContainers.forEach(container => {
+      let isDragging = false;
+      let startX;
+      let scrollLeft;
+
+      container.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        container.classList.add('active');
+        startX = e.pageX - container.offsetLeft;
+        scrollLeft = container.scrollLeft;
+        e.preventDefault();
+      });
+
+      container.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        e.preventDefault();
+        const x = e.pageX - container.offsetLeft;
+        const walk = (x - startX) * 1.5;
+        container.scrollLeft = scrollLeft - walk;
+      });
+
+      container.addEventListener('mouseup', () => {
+        isDragging = false;
+        container.classList.remove('active');
+      });
+
+      container.addEventListener('mouseleave', () => {
+        if (isDragging) {
+          isDragging = false;
+          container.classList.remove('active');
+        }
+      });
+
+      container.addEventListener('touchstart', (e) => {
+        isDragging = true;
+        startX = e.touches[0].pageX - container.offsetLeft;
+        scrollLeft = container.scrollLeft;
+        e.preventDefault();
+      });
+
+      container.addEventListener('touchmove', (e) => {
+        if (!isDragging) return;
+        const x = e.touches[0].pageX - container.offsetLeft;
+        const walk = (x - startX) * 1.5;
+        container.scrollLeft = scrollLeft - walk;
+        e.preventDefault();
+      });
+
+      container.addEventListener('touchend', () => {
+        isDragging = false;
+        container.classList.remove('active');
+      });
     });
   </script>
 </body>
