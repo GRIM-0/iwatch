@@ -4,6 +4,11 @@ require "config.php";
 require "auth.php";
 
 $signInError = signIn($conn, "index.php");
+
+if (isset($_SESSION["logged_in"]) && $_SESSION["logged_in"] === true) {
+    header("Location: index.php");
+    exit();
+}
 ?>
 
 <!DOCTYPE html>
@@ -50,7 +55,7 @@ $signInError = signIn($conn, "index.php");
         <div class="sign-box">
             <h2 class="text-center">Sign In</h2>
             <?php if ($signInError): ?>
-                <div class="error"><?php echo $signInError; ?></div>
+                <div class="error"><?php echo htmlspecialchars($signInError); ?></div> <!-- Added htmlspecialchars for security -->
             <?php endif; ?>
             <form method="POST" action="signin.php" id="signInForm">
                 <div class="mb-3">
@@ -62,6 +67,7 @@ $signInError = signIn($conn, "index.php");
                 <button type="submit" name="signInSubmit" class="btn btn-red w-100">Sign In</button>
             </form>
             <div class="mt-3 text-center">
+                <br>
                 <a href="signup.php">Need an account? Sign Up</a>
             </div>
         </div>

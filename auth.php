@@ -1,44 +1,40 @@
 <?php
-function signIn($conn, $redirect = null) {
-    $signInError = "";
-    if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST["signInSubmit"])) {
-        $username = trim($_POST["username"] ?? '');
-        $password = trim($_POST["password"] ?? '');
-
-        if (empty($username) || empty($password)) {
-            $signInError = "Please fill in all fields.";
-        } else {
-            error_log("Sign-in attempt for username: '$username'");
-            $stmt = $conn->prepare("SELECT id, username, password FROM users WHERE LOWER(username) = LOWER(?)");
-            if ($stmt === false) {
-                $signInError = "Database preparation failed: " . $conn->error;
-                error_log("Database error: " . $conn->error);
-            } else {
-                $stmt->bind_param("s", $username);
-                $stmt->execute();
-                $result = $stmt->get_result();
-
-                if ($result->num_rows == 1) {
-                    $user = $result->fetch_assoc();
-                    if (password_verify($password, $user["password"])) {
-                        $_SESSION["user_id"] = $user["id"];
-                        $_SESSION["username"] = $user["username"];
-                        $_SESSION["logged_in"] = true;
-                        error_log("Sign-in successful for user: " . $user["username"]);
-                        header("Location: " . ($redirect ?: basename($_SERVER['PHP_SELF'])));
-                        exit;
-                    } else {
-                        $signInError = "Invalid password.";
-                        error_log("Invalid password for username: '$username'");
-                    }
-                } else {
-                    $signInError = "User not found.";
-                    error_log("No user found for username: '$username'");
-                }
-                $stmt->close();
-            }
-        }
+function signIn($conn) {
+    if ($_SERVER["REQUEST_METHOD"] !== "POST" || !isset($_POST["signInSubmit"])) {
+        return "Invalid request.";
     }
-    return $signInError;
+
+    $username = trim($_POST["username"] ?? '');
+    $password = trim($_POST["password"] ?? '');
+
+    if (empty($username) || empty($password)) {
+        return "Username and password are required.";
+    }
+
+    // Fetch user from database using mysqli
+    $stmt = mysqli_prepare($conn, "SELECT id, username, password FROM users WHERE username = ?");
+    if (!$stmt) {
+        error_log("Database error: " . mysqli_error($conn));
+        return "Database error: " . mysqli_error($conn);
+    }
+    mysqli_stmt_bind_param($stmt, "s", $username);
+    if (!mysqli_stmt_execute($stmt)) {
+        error_log("Query execution error: " . mysqli_stmt_error($stmt));
+        return "Query execution error.";
+    }
+    $result = mysqli_stmt_get_result($stmt);
+    $user = mysqli_fetch_assoc($result);
+    mysqli_stmt_close($stmt);
+
+    if ($user && password_verify($password, $user['password'])) {
+        $_SESSION["logged_in"] = true;
+        $_SESSION["username"] = $user['username'];
+        $_SESSION["user_id"] = $user['id']; // Add user_id to session
+        error_log("Sign-in successful for user: $username");
+        return false;
+    } else {
+        error_log("Invalid credentials for user: $username");
+        return "Invalid username or password.";
+    }
 }
 ?>

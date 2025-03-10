@@ -1,17 +1,6 @@
 <?php
 session_start();
 require "config.php";
-require "auth.php";
-
-$signInError = signIn($conn);
-$results = [];
-if (isset($_GET["query"]) && !empty($_GET["query"])) {
-    $query = urlencode($_GET["query"]);
-    $url = "https://api.themoviedb.org/3/search/multi?api_key=$tmdb_api_key&query=$query";
-    $response = getCachedApiResponse($url);
-    $data = json_decode($response, true);
-    $results = $data["results"] ?? [];
-}
 ?>
 
 <!DOCTYPE html>
@@ -26,7 +15,7 @@ if (isset($_GET["query"]) && !empty($_GET["query"])) {
 <body>
     <nav class="navbar navbar-expand-lg">
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-            <span class="navbar-toggler-icon">&#9776;</span>
+            <span class="navbar-toggler-icon">☰</span>
         </button>
         <a class="navbar-brand" href="index.php">iWatch</a>
         <div class="collapse navbar-collapse" id="navbarNav">
@@ -39,7 +28,7 @@ if (isset($_GET["query"]) && !empty($_GET["query"])) {
         </div>
         <div class="sign-in-container">
             <?php if (isset($_SESSION["logged_in"]) && $_SESSION["logged_in"] === true): ?>
-                <li class="nav-item dropdown">
+                <div class="nav-item dropdown">
                     <a class="username-nav dropdown-toggle" href="#" id="accountDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                         <?php echo htmlspecialchars($_SESSION["username"]); ?>
                     </a>
@@ -47,80 +36,59 @@ if (isset($_GET["query"]) && !empty($_GET["query"])) {
                         <li><a class="dropdown-item" href="profile.php">Profile</a></li>
                         <li><a class="dropdown-item" href="logout.php">Log Out</a></li>
                     </ul>
-                </li>
+                </div>
             <?php else: ?>
-                <li class="nav-item"><a class="nav-link btn btn-red" href="#" data-bs-toggle="modal" data-bs-target="#signInModal">Sign In</a></li>
+                <div class="nav-item">
+                    <a class="nav-link btn btn-red" href="#" data-bs-toggle="modal" data-bs-target="#signInModal">Sign In</a>
+                </div>
             <?php endif; ?>
         </div>
     </nav>
 
-    <div class="container mt-4" style="margin-left: 260px;">
-        <h2 class="section-title">Search Results</h2>
-        <form method="GET" action="" class="mb-4">
+    <div class="container mt-4">
+        <h2 class="section-title">SEARCH</h2>
+        <form method="GET" action="search.php" class="mb-4">
             <div class="input-group">
-                <input type="text" class="form-control" name="query" placeholder="Enter movie or series name" value="<?php echo htmlspecialchars($_GET["query"] ?? ''); ?>" required>
+                <input type="text" class="form-control" name="query" placeholder="Search for movies or TV series..." value="<?php echo htmlspecialchars($_GET['query'] ?? ''); ?>" required>
                 <button type="submit" class="btn btn-red">Search</button>
             </div>
         </form>
-        <?php if (isset($_GET["query"]) && !empty($_GET["query"])): ?>
-            <div class="grid-container">
-                <?php
-                foreach ($results as $item) {
-                    $title = $item["title"] ?? $item["name"] ?? $item["original_name"];
-                    $poster = $item["poster_path"] ? "https://image.tmdb.org/t/p/w500" . $item["poster_path"] : "https://via.placeholder.com/200x300?text=No+Poster";
-                    $link = ($item["media_type"] === "movie") ? "moviedetails.php?id=" . $item["id"] : (($item["media_type"] === "tv") ? "seriesdetails.php?id=" . $item["id"] : "#");
-                    $rating = isset($item["vote_average"]) ? htmlspecialchars($item["vote_average"]) : "N/A";
-                    if ($poster) {
-                        echo '<div class="grid-item">';
-                        echo '<a href="' . $link . '">';
-                        echo '<img src="' . $poster . '" alt="' . htmlspecialchars($title) . '" loading="lazy">';
-                        echo '<div class="overlay">';
-                        echo '<div class="rating">' . $rating . '/10</div>';
-                        echo '<div class="title">' . $title . '</div>';
-                        echo '<span class="play-btn">Play</span>';
-                        echo '</div>';
-                        echo '</a>';
-                        echo '</div>';
-                    }
-                }
-                ?>
-            </div>
-            <?php if (empty($results)): ?>
-                <p>No results found.</p>
-            <?php endif; ?>
-        <?php endif; ?>
 
-        <!-- Sign In Modal -->
-        <div class="modal fade" id="signInModal" tabindex="-1" aria-labelledby="signInModalLabel" aria-hidden="true">
-            <div class="modal-dialog">
-                <div class="modal-content sign-box">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="signInModalLabel">iWatch - Sign In</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body">
-                        <form method="POST" action="" id="signInForm">
-                            <?php if ($signInError): ?>
-                                <div class="error"><?php echo $signInError; ?></div>
-                            <?php endif; ?>
-                            <div class="mb-3">
-                                <input type="text" class="form-control" name="username" placeholder="Username" required value="<?php echo htmlspecialchars($_POST["username"] ?? ''); ?>">
-                            </div>
-                            <div class="mb-3">
-                                <input type="password" class="form-control" name="password" placeholder="Password" required>
-                            </div>
-                            <button type="submit" name="signInSubmit" class="btn btn-red w-100">Sign In</button>
-                        </form>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                        <a href="signup.php">Need an account? Sign Up</a>
-                    </div>
-                </div>
-            </div>
-        </div>
+        <?php
+        if (isset($_GET['query']) && !empty(trim($_GET['query']))) {
+            $query = urlencode($_GET['query']);
+            $url = "https://api.themoviedb.org/3/search/multi?api_key=$tmdb_api_key&query=$query";
+            $response = getCachedApiResponse($url);
+            $results = json_decode($response, true)["results"] ?? [];
+            if (!empty($results)) {
+                echo '<div class="grid-container">';
+                foreach ($results as $item) {
+                    $poster = $item["poster_path"] ? "https://image.tmdb.org/t/p/w500" . $item["poster_path"] : "https://via.placeholder.com/200x300?text=No+Poster";
+                    $rating = isset($item["vote_average"]) ? htmlspecialchars($item["vote_average"]) : "N/A";
+                    $title = htmlspecialchars($item["title"] ?? $item["name"]);
+                    $type = $item["media_type"] === "movie" ? "moviedetails.php" : "seriesdetails.php";
+                    echo '<div class="grid-item">';
+                    echo '<a href="' . $type . '?id=' . $item["id"] . '">';
+                    echo '<img src="' . $poster . '" alt="' . $title . '" loading="lazy">';
+                    echo '<div class="overlay">';
+                    echo '<div class="rating">' . $rating . '/10</div>';
+                    echo '<div class="title">' . $title . '</div>';
+                    echo '<span class="play-btn">Play</span>';
+                    echo '</div>';
+                    echo '</a>';
+                    echo '</div>';
+                }
+                echo '</div>';
+            } else {
+                echo '<p>No results found for "' . htmlspecialchars($_GET['query']) . '".</p>';
+            }
+        }
+        ?>
+
+        <?php include 'modals.php'; ?>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="script.js"></script>
 </body>
 </html>
