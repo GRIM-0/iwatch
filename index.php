@@ -1,6 +1,45 @@
 <?php
 session_start();
 require "config.php";
+
+// Fetch popular and top-rated content
+$popularMoviesUrl = "https://api.themoviedb.org/3/movie/popular?api_key=" . $tmdb_api_key;
+$popularMoviesResponse = getCachedApiResponse($popularMoviesUrl);
+$popularMovies = json_decode($popularMoviesResponse, true)["results"] ?? [];
+
+$popularSeriesUrl = "https://api.themoviedb.org/3/tv/popular?api_key=" . $tmdb_api_key;
+$popularSeriesResponse = getCachedApiResponse($popularSeriesUrl);
+$popularSeries = json_decode($popularSeriesResponse, true)["results"] ?? [];
+
+$topRatedMoviesUrl = "https://api.themoviedb.org/3/movie/top_rated?api_key=" . $tmdb_api_key;
+$topRatedMoviesResponse = getCachedApiResponse($topRatedMoviesUrl);
+$topRatedMovies = json_decode($topRatedMoviesResponse, true)["results"] ?? [];
+
+$topRatedSeriesUrl = "https://api.themoviedb.org/3/tv/top_rated?api_key=" . $tmdb_api_key;
+$topRatedSeriesResponse = getCachedApiResponse($topRatedSeriesUrl);
+$topRatedSeries = json_decode($topRatedSeriesResponse, true)["results"] ?? [];
+
+// Recommendations for logged-in users
+$recommendations = [];
+if (isset($_SESSION["logged_in"]) && $_SESSION["logged_in"] && isset($conn)) {
+    $stmt = $conn->prepare("SELECT media_id, media_type FROM favorites WHERE user_id = ? ORDER BY created_at DESC LIMIT 1");
+    $stmt->bind_param("i", $_SESSION["user_id"]);
+    $stmt->execute();
+    $favorite = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    if ($favorite) {
+        $media_id = $favorite['media_id'];
+        $media_type = $favorite['media_type'];
+        $recUrl = "https://api.themoviedb.org/3/$media_type/$media_id/similar?api_key=$tmdb_api_key";
+        $recResponse = getCachedApiResponse($recUrl);
+        $recData = json_decode($recResponse, true);
+        $recommendations = $recData["results"] ?? [];
+        foreach ($recommendations as &$rec) {
+            $rec['media_type'] = $media_type;
+        }
+    }
+}
 ?>
 
 <!DOCTYPE html>
@@ -8,76 +47,136 @@ require "config.php";
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>iWatch - Movies</title>
+    <title>iWatch - Home</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="styles.css" rel="stylesheet">
 </head>
 <body>
-<nav class="navbar navbar-expand-lg">
-    <div class="container-fluid">
-        <a class="navbar-brand" href="index.php">iWatch</a>
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
-            <span class="navbar-toggler-icon">☰</span>
-        </button>
-        <div class="collapse navbar-collapse" id="navbarNav">
-            <ul class="navbar-nav me-auto">
-                <li class="nav-item">
-                    <a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'index.php' ? 'active' : ''; ?>" href="index.php">Home</a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'movies.php' ? 'active' : ''; ?>" href="movies.php">Movies</a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'tv-series.php' ? 'active' : ''; ?>" href="tv-series.php">TV Series</a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'search.php' ? 'active' : ''; ?>" href="search.php">Search</a>
-                </li>
-            </ul>
-            <ul class="navbar-nav ms-auto">
-                <?php if (isset($_SESSION["logged_in"]) && $_SESSION["logged_in"] === true): ?>
-                    <li class="nav-item dropdown">
-                        <a class="username-nav dropdown-toggle nav-link" href="#" id="accountDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                            <?php echo htmlspecialchars($_SESSION["username"]); ?>
-                        </a>
-                        <ul class="dropdown-menu" aria-labelledby="accountDropdown">
-                            <li><a class="dropdown-item" href="profile.php">Profile</a></li>
-                            <li><a class="dropdown-item" href="logout.php">Log Out</a></li>
-                        </ul>
-                    </li>
-                <?php else: ?>
-                    <li class="nav-item">
-                        <a class="nav-link btn btn-red" href="#" data-bs-toggle="modal" data-bs-target="#signInModal">Sign In</a>
-                    </li>
-                <?php endif; ?>
-            </ul>
-        </div>
-    </div>
-</nav>
+<?php include 'navbar.php'; ?>
 
     <div class="container mt-4">
-        <h2 class="section-title">MOVIES</h2>
-        <div class="grid-container">
-            <?php
-            $url = "https://api.themoviedb.org/3/discover/movie?api_key=$tmdb_api_key";
-            $response = getCachedApiResponse($url);
-            $movies = json_decode($response, true)["results"] ?? [];
-            foreach ($movies as $movie) {
-                $poster = $movie["poster_path"] ? "https://image.tmdb.org/t/p/w500" . $movie["poster_path"] : "https://via.placeholder.com/200x300?text=No+Poster";
-                $rating = isset($movie["vote_average"]) ? htmlspecialchars($movie["vote_average"]) : "N/A";
-                $title = htmlspecialchars($movie["title"]);
-                echo '<div class="grid-item">';
-                echo '<a href="moviedetails.php?id=' . $movie["id"] . '">';
-                echo '<img src="' . $poster . '" alt="' . $title . '" loading="lazy">';
-                echo '<div class="overlay">';
-                echo '<div class="rating">' . $rating . '/10</div>';
-                echo '<div class="title">' . $title . '</div>';
-                echo '<span class="play-btn">Play</span>';
-                echo '</div>';
-                echo '</a>';
-                echo '</div>';
-            }
-            ?>
+        <!-- Section: Recommended for You -->
+        <?php if (!empty($recommendations)): ?>
+            <h2 class="section-title">Recommended for You</h2>
+            <div class="scroll-container">
+                <div class="grid-container">
+                    <?php
+                    foreach ($recommendations as $rec) {
+                        $poster = $rec["poster_path"] ? "https://image.tmdb.org/t/p/w500" . $rec["poster_path"] : "https://via.placeholder.com/200x300?text=No+Poster";
+                        $rating = isset($rec["vote_average"]) ? htmlspecialchars($rec["vote_average"]) : "N/A";
+                        $title = htmlspecialchars($rec["title"] ?? $rec["name"] ?? "Unknown");
+                        $link = $rec["media_type"] == "movie" ? "moviedetails.php?id=" . $rec["id"] : "seriesdetails.php?id=" . $rec["id"];
+                        echo '<div class="grid-item">';
+                        echo '<a href="' . $link . '">';
+                        echo '<img src="' . $poster . '" alt="' . $title . '" loading="lazy">';
+                        echo '<div class="overlay">';
+                        echo '<div class="rating">' . $rating . '/10</div>';
+                        echo '<div class="title">' . $title . '</div>';
+                        echo '<span class="play-btn">Play</span>';
+                        echo '</div>';
+                        echo '</a>';
+                        echo '</div>';
+                    }
+                    ?>
+                </div>
+            </div>
+        <?php endif; ?>
+
+        <!-- Section: Popular Movies -->
+        <h2 class="section-title">Popular Movies</h2>
+        <div class="scroll-container">
+            <div class="grid-container">
+                <?php
+                foreach ($popularMovies as $movie) {
+                    $poster = $movie["poster_path"] ? "https://image.tmdb.org/t/p/w500" . $movie["poster_path"] : "https://via.placeholder.com/200x300?text=No+Poster";
+                    $rating = isset($movie["vote_average"]) ? htmlspecialchars($movie["vote_average"]) : "N/A";
+                    $title = htmlspecialchars($movie["title"]);
+                    echo '<div class="grid-item">';
+                    echo '<a href="moviedetails.php?id=' . $movie["id"] . '">';
+                    echo '<img src="' . $poster . '" alt="' . $title . '" loading="lazy">';
+                    echo '<div class="overlay">';
+                    echo '<div class="rating">' . $rating . '/10</div>';
+                    echo '<div class="title">' . $title . '</div>';
+                    echo '<span class="play-btn">Play</span>';
+                    echo '</div>';
+                    echo '</a>';
+                    echo '</div>';
+                }
+                ?>
+            </div>
+        </div>
+
+        <!-- Section: Popular TV Series -->
+        <h2 class="section-title">Popular TV Series</h2>
+        <div class="scroll-container">
+            <div class="grid-container">
+                <?php
+                foreach ($popularSeries as $serie) {
+                    $poster = $serie["poster_path"] ? "https://image.tmdb.org/t/p/w500" . $serie["poster_path"] : "https://via.placeholder.com/200x300?text=No+Poster";
+                    $rating = isset($serie["vote_average"]) ? htmlspecialchars($serie["vote_average"]) : "N/A";
+                    $name = htmlspecialchars($serie["name"]);
+                    echo '<div class="grid-item">';
+                    echo '<a href="seriesdetails.php?id=' . $serie["id"] . '">';
+                    echo '<img src="' . $poster . '" alt="' . $name . '" loading="lazy">';
+                    echo '<div class="overlay">';
+                    echo '<div class="rating">' . $rating . '/10</div>';
+                    echo '<div class="title">' . $name . '</div>';
+                    echo '<span class="play-btn">Play</span>';
+                    echo '</div>';
+                    echo '</a>';
+                    echo '</div>';
+                }
+                ?>
+            </div>
+        </div>
+
+        
+        <!-- Section: Top Rated Movies -->
+        <h2 class="section-title">Top Rated Movies</h2>
+        <div class="scroll-container">
+            <div class="grid-container">
+                <?php
+                foreach ($topRatedMovies as $movie) {
+                    $poster = $movie["poster_path"] ? "https://image.tmdb.org/t/p/w500" . $movie["poster_path"] : "https://via.placeholder.com/200x300?text=No+Poster";
+                    $rating = isset($movie["vote_average"]) ? htmlspecialchars($movie["vote_average"]) : "N/A";
+                    $title = htmlspecialchars($movie["title"]);
+                    echo '<div class="grid-item">';
+                    echo '<a href="moviedetails.php?id=' . $movie["id"] . '">';
+                    echo '<img src="' . $poster . '" alt="' . $title . '" loading="lazy">';
+                    echo '<div class="overlay">';
+                    echo '<div class="rating">' . $rating . '/10</div>';
+                    echo '<div class="title">' . $title . '</div>';
+                    echo '<span class="play-btn">Play</span>';
+                    echo '</div>';
+                    echo '</a>';
+                    echo '</div>';
+                }
+                ?>
+            </div>
+        </div>
+
+        <!-- Section: Top Rated TV Series -->
+        <h2 class="section-title">Top Rated TV Series</h2>
+        <div class="scroll-container">
+            <div class="grid-container">
+                <?php
+                foreach ($topRatedSeries as $serie) {
+                    $poster = $serie["poster_path"] ? "https://image.tmdb.org/t/p/w500" . $serie["poster_path"] : "https://via.placeholder.com/200x300?text=No+Poster";
+                    $rating = isset($serie["vote_average"]) ? htmlspecialchars($serie["vote_average"]) : "N/A";
+                    $name = htmlspecialchars($serie["name"]);
+                    echo '<div class="grid-item">';
+                    echo '<a href="seriesdetails.php?id=' . $serie["id"] . '">';
+                    echo '<img src="' . $poster . '" alt="' . $name . '" loading="lazy">';
+                    echo '<div class="overlay">';
+                    echo '<div class="rating">' . $rating . '/10</div>';
+                    echo '<div class="title">' . $name . '</div>';
+                    echo '<span class="play-btn">Play</span>';
+                    echo '</div>';
+                    echo '</a>';
+                    echo '</div>';
+                }
+                ?>
+            </div>
         </div>
 
         <?php include 'modals.php'; ?>

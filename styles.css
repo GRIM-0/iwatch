@@ -1,432 +1,275 @@
+/* General Styles */
 body {
-    background: linear-gradient(135deg, #171718 0%, #111111 100%);
-    color: #9e9e9e;
+    background-color: #1a1a1a; /* Dark background */
+    color: #fff; /* White text */
+    font-family: Arial, sans-serif;
     margin: 0;
-    padding: 0;
-    font-family: 'Arial', sans-serif;
-    overflow-x: hidden; /* Prevent horizontal scrollbar */
 }
 
+/* Navbar */
 .navbar {
-    background-color: #252424; /* Vibrant coral red for contrast */
+    background-color: #2c2c2c; /* Dark gray */
     padding: 1rem;
-    position: relative;
-    z-index: 1000;
-    transition: transform 0.3s ease;
 }
 
 .navbar-brand {
-    color: #e4dddd !important;
-    font-size: 2.0rem;
-    font-weight: bolder;
-    letter-spacing: 2px;
-}
-
-.navbar-brand:hover {
-    color: rgb(245, 70, 70) !important; /* Darker coral on hover */
-}
-
-.navbar-toggler {
-    display: none; /* Hidden by default, shown on mobile */
-    position: fixed;
-    top: 1rem;
-    right: 1rem;
-    z-index: 1001;
-    background: none;
-    border: none;
-    color: #ffffff;
-    font-size: 1.4rem;
-    cursor: pointer;
-    padding: 0.5rem;
-}
-
-.navbar-toggler:focus {
-    outline: none;
-    box-shadow: 0 0 5px #00d4ff; /* Teal glow on focus */
-}
-
-.nav-link {
-    color: #fff !important;
-    padding: 0.75rem 1rem;
-    display: block;
-    font-weight: 500;
-    transition: color 0.3s ease;
-}
-
-.nav-link:hover {
-    color: #e65b4d !important; /* Darker coral on hover */
-}
-
-.nav-link.active {
-    color: #ffffff !important; /* Teal accent for active */
+    color: #fff;
     font-weight: bold;
-    background-color: rgb(218, 38, 38);
-    border-radius: 5px;
-}
-
-.btn-red {
-    background-color: #fa2323; /* Bright orange for buttons */
-    color: #fff;
-    border: none;
-    padding: 0.5rem 1.5rem;
-    border-radius: 5px;
-    transition: background-color 0.3s ease;
-}
-
-.btn-red:hover {
-    background-color: #a31616; /* Lighter orange on hover */
-}
-
-.sign-box {
-    background-color: #252424; /* Changed to match navbar background for consistency */
-    padding: 20px;
-    border-radius: 10px;
-    max-width: 400px;
-    margin: 20px auto;
-    box-shadow: 0 0 15px rgba(0, 0, 0, 0.5);
-    color: #fff; /* Ensure text inside modal is white for readability */
-}
-
-.sign-box .modal-header {
-    border-bottom: 1px solid #3a3a4e; /* Slightly lighter border to match theme */
-}
-
-.sign-box .modal-title {
-    color: #e4dddd; /* Match navbar-brand color */
-}
-
-.sign-box .btn-close {
-    filter: invert(1); /* Make the close button white */
-}
-
-.sign-box .alert-danger {
-    background-color: #ff6f61; /* Coral red for error background */
-    color: #fff; /* White text for readability */
-    border: none;
-}
-
-.form-control {
-    background-color: #f1ebeb; /* Darker input background */
-    border: none;
-    color: #050404; /* Black text for contrast on light input background */
-    border-radius: 5px;
-}
-
-.form-control:focus {
-    background-color: #73cfcb;
-    color: #fff;
-    box-shadow: 0 0 10px #00d4ff; /* Teal glow on focus */
-    border: none;
-}
-
-.sign-box p {
-    color: #9e9e9e; /* Match body text color */
-}
-
-.sign-box a {
-    color: #ff9f55; /* Orange for links to match theme */
     text-decoration: none;
 }
 
-.sign-box a:hover {
-    color: #e65b4d; /* Darker coral on hover, matching nav-link hover */
+.nav-link {
+    color: #ccc;
+    transition: color 0.3s;
 }
 
+.nav-link:hover, .nav-link.active {
+    color: #fff;
+}
+
+.username-nav {
+    color: #fff;
+}
+
+.btn-red {
+    background-color: #e50914; /* Red accent */
+    color: #fff;
+    border: none;
+    padding: 0.5rem 1rem;
+}
+
+.btn-red:hover {
+    background-color: #f40612;
+    color: #fff;
+}
+
+.dropdown-menu {
+    background-color: #2c2c2c;
+    border: none;
+}
+
+.dropdown-item {
+    color: #ccc;
+}
+
+.dropdown-item:hover {
+    background-color: #444;
+    color: #fff;
+}
+
+/* Container */
+.container {
+    max-width: 1200px;
+    padding: 0 15px;
+}
+
+/* Section Titles */
 .section-title {
-    margin-bottom: 10px;
-    font-size: 1.8rem;
-    color: #d11414; /* Teal for section titles */
-    text-transform: uppercase;
-    letter-spacing: 1px;
+    color: #fff;
+    margin-bottom: 1rem;
+    font-size: 1.5rem;
 }
 
+/* Scroll Container */
 .scroll-container {
-    display: flex;
-    flex-wrap: nowrap;
-    overflow-x: hidden;
-    padding-bottom: 10px;
-    cursor: grab;
-    user-select: none;
+    overflow-x: auto;
+    white-space: nowrap;
+    padding-bottom: 1rem;
+    -webkit-overflow-scrolling: touch; /* Smooth scrolling on mobile */
+}
+.scroll-container::-webkit-scrollbar {
+    display: none;
 }
 
-.scroll-container.active {
-    cursor: grabbing;
-}
-
-.scroll-item {
-    flex: 0 0 auto;
-    margin-right: 15px;
-}
-
-.scroll-item img {
-    width: 200px;
-    height: 300px;
-    object-fit: cover;
-    border-radius: 5px;
-    pointer-events: none;
-    transition: transform 0.3s ease;
-}
-
-.scroll-item img:hover {
-    transform: scale(1.05);
-}
-
+/* Grid Container */
 .grid-container {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 15px;
-    padding: 10px;
-    width: 100%;
-    box-sizing: border-box; /* Ensure padding doesn't cause overflow */
+    display: inline-flex;
+    gap: 1rem;
 }
 
 .grid-item {
     position: relative;
-    width: 100%;
-    transition: transform 0.3s ease;
+    width: 200px;
+    flex-shrink: 0;
 }
 
 .grid-item img {
     width: 100%;
-    height: 300px;
-    object-fit: cover;
+    height: auto;
     border-radius: 5px;
-    display: block;
-    transition: transform 0.3s ease;
 }
 
-.grid-item:hover img {
-    transform: scale(1.05);
-}
-
-.grid-item .overlay {
+/* Overlay */
+.overlay {
     position: absolute;
     top: 0;
     left: 0;
     width: 100%;
     height: 100%;
     background: rgba(0, 0, 0, 0.7);
-    color: #fff;
+    opacity: 0;
     display: flex;
     flex-direction: column;
     justify-content: center;
     align-items: center;
-    opacity: 0;
-    transition: opacity 0.3s ease;
+    transition: opacity 0.3s;
     border-radius: 5px;
+    z-index: 1; /* Lower than interactive elements */
+    pointer-events: none; /* Allows clicks to pass through */
 }
-
 .grid-item:hover .overlay {
     opacity: 1;
 }
 
-.overlay .rating {
+.rating {
+    color: #ffd700; /* Gold */
     font-size: 1.2rem;
-    margin-bottom: 10px;
-    color: #ffffff; /* Orange for ratings */
 }
 
-.overlay .title {
+.title {
+    color: #fff;
     font-size: 1rem;
     text-align: center;
-    margin-bottom: 10px;
-    color: #fff;
-    text-shadow: 0 0 5px #00d4ff; /* Neon teal text shadow */
+    margin: 0.5rem 0;
+    padding: 0 5px;
 }
 
-.overlay .play-btn {
-    background-color: #ee2323; /* Orange play button */
+.play-btn {
+    display: inline-block;
+    padding: 0.5rem 1rem;
+    background-color: #e50914;
     color: #fff;
-    padding: 8px 16px;
     border-radius: 5px;
     text-decoration: none;
     font-size: 0.9rem;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    transition: background-color 0.3s ease;
 }
 
-.overlay .play-btn:hover {
-    background-color: #ff8c42; /* Lighter orange on hover */
-}
-
-.btn-favorite {
-    background-color: #ff9f55; /* Orange to match theme */
+/* Modal */
+.sign-box {
+    background-color: #2c2c2c;
     color: #fff;
-    border: none;
-    padding: 8px 16px;
-    border-radius: 5px;
-    font-size: 0.9rem;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    cursor: pointer;
-    transition: background-color 0.3s ease;
-    display: block;
-    margin: 10px auto; /* Center it in non-grid contexts */
 }
 
-.btn-favorite:hover {
-    background-color: #e65b4d; /* Darker coral on hover */
+.modal-header, .modal-footer {
+    border-color: #444;
 }
 
-.btn-favorite:disabled {
-    background-color: #3a3a4e; /* Grayed out when favorited */
-    cursor: not-allowed;
-}
-
-/* Position Favorite Button below grid item image */
-.grid-item .btn-favorite {
-    position: absolute;
-    bottom: -40px; /* Place below the image */
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 10;
-}
-
-.username-nav {
+.form-control {
+    background-color: #333;
     color: #fff;
-    font-weight: bold;
-    text-decoration: none;
-    padding: 0.5rem 1rem;
-    background: none;
-    transition: color 0.3s ease;
+    border-color: #444;
 }
 
-.username-nav:hover {
-    color: #e42828; /* Teal on hover */
+.form-control::placeholder {
+    color: #aaa;
 }
 
-.dropdown-menu {
-    background-color: #2a2a3e;
+/* Watchlist Specific */
+.card {
+    background-color: #333;
     border: none;
     border-radius: 5px;
-    box-shadow: 0 0 15px rgba(0, 0, 0, 0.5);
 }
 
-.dropdown-item {
+.card-img-top {
+    width: 100%;
+    height: auto;
+    border-top-left-radius: 5px;
+    border-top-right-radius: 5px;
+}
+
+.card-body {
+    padding: 1rem;
+}
+
+.card-title {
     color: #fff;
-    padding: 0.5rem 1rem;
+    font-size: 1.1rem;
+    margin-bottom: 0.5rem;
 }
 
-.dropdown-item:hover {
-    background-color: #3a3a4e;
-    color: #ff9f55; /* Orange highlight */
+.btn-primary {
+    background-color: #007bff;
+    border: none;
 }
 
-.error {
-    color: #ff6f61; /* Coral red for errors */
-    margin-top: 10px;
-    font-weight: bold;
+.btn-primary:hover {
+    background-color: #0056b3;
 }
 
-.content-box {
-    background-color: #0e0e0f;
-    padding: 20px;
-    border-radius: 10px;
-    margin: 20px auto;
-    max-width: 800px;
-    display: flex;
-    gap: 20px;
-    box-shadow: 0 0 15px rgba(0, 0, 0, 0.5);
+.btn-danger {
+    background-color: #dc3545;
+    border: none;
 }
 
-.content-box img.poster {
-    width: 300px;
-    height: 450px;
-    object-fit: cover;
-    border-radius: 5px;
-    border: 2px solid #fc1818; /* Teal border */
+.btn-danger:hover {
+    background-color: #b02a37;
 }
 
-.content-box .details {
-    flex: 1;
+
+/* Search Form */
+.input-group .form-control {
+    border-radius: 5px 0 0 5px;
 }
 
-.content-box .details h2 {
-    margin-top: 0;
-    color: #ff9f55; /* Orange for titles */
-    text-transform: uppercase;
+.input-group .btn-red {
+    border-radius: 0 5px 5px 0;
 }
 
-.content-box .details .genres {
-    margin: 10px 0;
-}
+/* Responsive Adjustments */
+@media (max-width: 768px) {
+    .grid-item {
+        width: 150px;
+    }
 
-.content-box .details .genres span {
-    background-color: #ff9f55; /* Teal for genres */
-    padding: 5px 10px;
-    border-radius: 5px;
-    margin-right: 5px;
-    font-size: 0.9rem;
-    color: #fff;
-    text-transform: uppercase;
-}
+    .section-title {
+        font-size: 1.25rem;
+    }
 
-.content-box .details .cast {
-    margin-top: 10px;
-}
-
-.content-box .details .cast h4 {
-    margin-bottom: 5px;
-    color: #ff9f55; /* Orange for cast title */
-}
-
-/* Navbar adjustments */
-@media (max-width: 800px) {
     .navbar {
-        flex-direction: column;
-        align-items: flex-start;
-        height: 100vh;
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 250px;
-        padding-top: 2rem;
-        transform: translateX(-100%);
-    }
-
-    .navbar.active {
-        transform: translateX(0);
-    }
-
-    .navbar-brand {
-        margin-bottom: 1rem;
-    }
-
-    .navbar-nav {
-        flex-direction: column;
-        width: 100%;
-    }
-
-    .navbar-toggler {
-        display: block; /* Ensure toggler is visible on mobile */
-    }
-
-    .sign-in-container {
-        position: fixed;
-        top: 1rem;
-        right: 1rem;
-        z-index: 1001;
-    }
-
-    .container {
-        margin-left: 0; /* Remove margin on mobile to eliminate gap */
-        padding: 20px;
-        max-width: 100%; /* Ensure container fits viewport */
+        padding: 0.5rem;
     }
 }
 
-.container {
-    margin-left: 260px; /* Adjusted for navbar */
-    padding: 20px;
-    max-width: calc(100% - 260px); /* Prevent overflow by accounting for margin */
-    transition: margin-left 0.3s ease;
-    box-sizing: border-box; /* Ensure padding doesn't cause overflow */
+@media (max-width: 576px) {
+    .grid-item {
+        width: 120px;
+    }
+
+    .rating {
+        font-size: 1rem;
+    }
+
+    .title {
+        font-size: 0.9rem;
+    }
+
+    .play-btn {
+        padding: 0.4rem 0.8rem;
+        font-size: 0.8rem;
+    }
 }
 
-.sign-in-container {
-    position: absolute;
-    top: 1rem;
-    right: 1rem;
-    z-index: 1001;
+.btn-review {
+    background-color: #e50914;
+    color: #fff;
+    border: none;
+}
+
+.btn-review:hover {
+    background-color: #f40612;
+}
+
+.btn-favorite.active {
+    background-color: #007bff;
+    color: #fff;
+    border-color: #007bff;
+}
+
+
+.status-select, .btn-remove-watchlist {
+    position: relative;
+    z-index: 2; /* Above overlay */
+    margin-top: 10px;
+    width: 100%;
 }

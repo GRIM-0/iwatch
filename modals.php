@@ -7,7 +7,7 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-                <form id="signInForm">
+            <form id="signInForm" class="needs-validation" novalidate>
                     <div class="mb-3">
                         <input type="text" class="form-control" name="username" placeholder="Username" required>
                     </div>
@@ -33,7 +33,7 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-                <form id="signUpForm">
+                <form id="signUpForm" class="needs-validation" novalidate>
                     <div class="mb-3">
                         <input type="text" class="form-control" name="username" placeholder="Username" required>
                     </div>
