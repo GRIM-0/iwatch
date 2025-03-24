@@ -8,7 +8,7 @@ body {
 
 /* Navbar */
 .navbar {
-    background-color: #2c2c2c; /* Dark gray */
+    background-color: #181616; /* Dark gray */
     padding: 1rem;
 }
 
@@ -272,4 +272,33 @@ body {
     z-index: 2; /* Above overlay */
     margin-top: 10px;
     width: 100%;
+}/* Access Denied Message */
+.access-denied {
+    background-color: #2c2c2c; /* Matches navbar and sign-box */
+    color: #fff; /* White text like navbar */
+    padding: 2rem;
+    border-radius: 5px;
+    margin-top: 5rem; /* Matches mt-5 */
+}
+
+.access-denied h4 {
+    color: #fff; /* Matches navbar-brand */
+    font-size: 1.5rem; /* Matches section-title */
+    margin-bottom: 1rem;
+}
+
+.access-denied p {
+    color: #ccc; /* Matches nav-link default */
+    font-size: 1rem;
+}
+
+.access-link {
+    color: #e50914; /* Matches btn-red */
+    text-decoration: none;
+    transition: color 0.3s; /* Matches nav-link */
+}
+
+.access-link:hover {
+    color: #f40612; /* Matches btn-red:hover */
+    text-decoration: underline;
 }

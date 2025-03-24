@@ -13,6 +13,19 @@ $url = "https://api.themoviedb.org/3/movie/$id?api_key=$tmdb_api_key";
 $response = getCachedApiResponse($url);
 $movie = json_decode($response, true);
 
+// Fetch trailer video
+$videoUrl = "https://api.themoviedb.org/3/movie/$id/videos?api_key=$tmdb_api_key";
+$videoResponse = getCachedApiResponse($videoUrl);
+$videoData = json_decode($videoResponse, true);
+$trailer = null;
+foreach ($videoData["results"] ?? [] as $video) {
+    if (strtolower($video["type"]) === "trailer" && strtolower($video["site"]) === "youtube") {
+        $trailer = $video;
+        break;
+    }
+}
+$trailerUrl = $trailer ? "https://www.youtube.com/watch?v=" . $trailer["key"] : null;
+
 // Fetch cast (credits)
 $castUrl = "https://api.themoviedb.org/3/movie/$id/credits?api_key=$tmdb_api_key";
 $castResponse = getCachedApiResponse($castUrl);
@@ -99,7 +112,11 @@ if (isset($_SESSION["logged_in"]) && $_SESSION["logged_in"] === true && isset($_
                     </div>
 
                     <div class="action-buttons mt-3">
-                        <a href="#" class="btn btn-red me-2">Watch Now</a>
+                        <?php if ($trailerUrl): ?>
+                            <a href="#" class="btn btn-red me-2 btn-watch-trailer" data-trailer-url="<?php echo htmlspecialchars($trailerUrl); ?>" data-bs-toggle="modal" data-bs-target="#trailerModal">Watch Trailer</a>
+                        <?php else: ?>
+                            <a href="#" class="btn btn-red me-2 disabled" disabled>Watch Trailer (Not Available)</a>
+                        <?php endif; ?>
                         <?php if (isset($_SESSION["logged_in"]) && $_SESSION["logged_in"] === true): ?>
                             <button class="btn btn-outline-primary btn-favorite <?php echo $isFavorited ? 'active' : ''; ?>" 
                                     data-media-id="<?php echo $id; ?>" 
@@ -146,6 +163,23 @@ if (isset($_SESSION["logged_in"]) && $_SESSION["logged_in"] === true && isset($_
     </div>
 
     <?php include 'modals.php'; ?>
+</div>
+
+<!-- Trailer Modal -->
+<div class="modal fade" id="trailerModal" tabindex="-1" aria-labelledby="trailerModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content sign-box">
+            <div class="modal-header">
+                <h5 class="modal-title" id="trailerModalLabel">Watch Trailer</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="ratio ratio-16x9">
+                    <iframe id="trailerIframe" src="" frameborder="0" allowfullscreen></iframe>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>

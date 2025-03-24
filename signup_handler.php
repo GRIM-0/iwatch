@@ -3,9 +3,8 @@ session_start();
 require "config.php";
 
 header('Content-Type: application/json');
-$response = ['success' => false, 'error' => ''];
+$response = ['success' => false, 'error' => '', 'showPreferences' => false];
 
-// Enable error logging
 ini_set('display_errors', 0);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
@@ -47,7 +46,12 @@ if (!isset($conn) || !$conn) {
                 } else {
                     $stmt->bind_param("sss", $username, $email, $hashed_password);
                     if ($stmt->execute()) {
+                        $user_id = $stmt->insert_id;
+                        $_SESSION["logged_in"] = true;
+                        $_SESSION["user_id"] = $user_id;
+                        $_SESSION["username"] = $username;
                         $response['success'] = true;
+                        $response['showPreferences'] = true; // Signal to show preferences modal
                         error_log("Sign-up successful: username=$username");
                     } else {
                         $response['error'] = 'Failed to sign up: ' . $stmt->error;

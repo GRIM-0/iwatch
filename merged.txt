@@ -1,0 +1,2411 @@
+=== /opt/lampp/htdocs/iwatch/signup_handler.php ===
+<?php
+session_start();
+require "config.php";
+
+header('Content-Type: application/json');
+$response = ['success' => false, 'error' => ''];
+
+// Enable error logging
+ini_set('display_errors', 0);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
+error_log("Starting signup_handler.php");
+
+if (!isset($conn) || !$conn) {
+    $response['error'] = 'Database connection failed.';
+    error_log("Database connection failed: " . mysqli_connect_error());
+} elseif ($_SERVER["REQUEST_METHOD"] === "POST") {
+    $username = filter_var($_POST["username"] ?? '', FILTER_SANITIZE_STRING);
+    $email = filter_var($_POST["email"] ?? '', FILTER_SANITIZE_EMAIL);
+    $password = $_POST["password"] ?? '';
+
+    error_log("Sign-up attempt: username=$username, email=$email");
+
+    if (empty($username) || empty($email) || empty($password)) {
+        $response['error'] = 'Please fill in all fields.';
+    } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $response['error'] = 'Invalid email format.';
+    } else {
+        $stmt = $conn->prepare("SELECT id FROM users WHERE username = ? OR email = ?");
+        if (!$stmt) {
+            $response['error'] = 'Database error: ' . mysqli_error($conn);
+            error_log("Select prepare failed: " . mysqli_error($conn));
+        } else {
+            $stmt->bind_param("ss", $username, $email);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            if ($result->num_rows > 0) {
+                $response['error'] = 'Username or email already taken.';
+                error_log("Sign-up failed: Username or email taken - username=$username, email=$email");
+            } else {
+                $hashed_password = password_hash($password, PASSWORD_DEFAULT);
+                $stmt = $conn->prepare("INSERT INTO users (username, email, password) VALUES (?, ?, ?)");
+                if (!$stmt) {
+                    $response['error'] = 'Database error: ' . mysqli_error($conn);
+                    error_log("Insert prepare failed: " . mysqli_error($conn));
+                } else {
+                    $stmt->bind_param("sss", $username, $email, $hashed_password);
+                    if ($stmt->execute()) {
+                        $response['success'] = true;
+                        error_log("Sign-up successful: username=$username");
+                    } else {
+                        $response['error'] = 'Failed to sign up: ' . $stmt->error;
+                        error_log("Sign-up failed: " . $stmt->error);
+                    }
+                }
+            }
+            $stmt->close();
+        }
+    }
+} else {
+    $response['error'] = 'Invalid request method.';
+    error_log("Invalid request method: " . $_SERVER["REQUEST_METHOD"]);
+}
+
+echo json_encode($response);
+exit();
+?>
+
+=== /opt/lampp/htdocs/iwatch/favorites_handler.php ===
+<?php
+session_start();
+require "config.php";
+
+ini_set('display_errors', 0);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
+header('Content-Type: application/json');
+$response = ['success' => false, 'error' => '', 'isFavorited' => false];
+
+error_log("Starting favorites_handler.php");
+
+if (!isset($conn) || !$conn) {
+    $response['error'] = 'Database connection failed: ' . mysqli_connect_error();
+} elseif (!isset($_SESSION["logged_in"]) || !$_SESSION["logged_in"]) {
+    $response['error'] = 'Please sign in to manage favorites.';
+} elseif (!isset($_SESSION["user_id"])) {
+    $response['error'] = 'User ID not set in session.';
+} elseif ($_SERVER["REQUEST_METHOD"] !== "POST" || !isset($_POST["action"])) {
+    $response['error'] = 'Invalid request.';
+} else {
+    $user_id = (int)$_SESSION["user_id"];
+    $media_id = filter_var($_POST["media_id"] ?? '', FILTER_VALIDATE_INT);
+    $media_type = filter_var($_POST["media_type"] ?? '', FILTER_SANITIZE_STRING);
+
+    if ($media_id === false || !in_array($media_type, ['movie', 'tv'])) {
+        $response['error'] = 'Invalid media details.';
+    } else {
+        $stmt = $conn->prepare("SELECT COUNT(*) FROM favorites WHERE user_id = ? AND media_id = ? AND media_type = ?");
+        $stmt->bind_param("iis", $user_id, $media_id, $media_type);
+        $stmt->execute();
+        $count = $stmt->get_result()->fetch_row()[0];
+        $stmt->close();
+
+        if ($_POST["action"] === "toggle") {
+            if ($count > 0) {
+                $stmt = $conn->prepare("DELETE FROM favorites WHERE user_id = ? AND media_id = ? AND media_type = ?");
+                $stmt->bind_param("iis", $user_id, $media_id, $media_type);
+                if ($stmt->execute()) {
+                    $response['success'] = true;
+                    $response['isFavorited'] = false;
+                    $response['message'] = 'Removed from favorites.';
+                }
+                $stmt->close();
+            } else {
+                $stmt = $conn->prepare("INSERT INTO favorites (user_id, media_id, media_type) VALUES (?, ?, ?)");
+                $stmt->bind_param("iis", $user_id, $media_id, $media_type);
+                if ($stmt->execute()) {
+                    $response['success'] = true;
+                    $response['isFavorited'] = true;
+                    $response['message'] = 'Added to favorites.';
+                }
+                $stmt->close();
+            }
+        } elseif ($_POST["action"] === "add" && $count == 0) {
+            $stmt = $conn->prepare("INSERT INTO favorites (user_id, media_id, media_type, created_at) VALUES (?, ?, ?, NOW())");            $stmt->bind_param("iis", $user_id, $media_id, $media_type);
+            if ($stmt->execute()) {
+                $response['success'] = true;
+                $response['isFavorited'] = true;
+            }
+            $stmt->close();
+        } elseif ($_POST["action"] === "add") {
+            $response['error'] = 'Already in favorites.';
+        }
+    }
+}
+
+echo json_encode($response);
+exit();
+?>
+
+=== /opt/lampp/htdocs/iwatch/reviews_handler.php ===
+<?php
+session_start();
+error_log("Received POST request: " . json_encode($_POST));
+
+require "config.php";
+
+// Enable error reporting for logs, not display
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
+error_reporting(E_ALL);
+
+header('Content-Type: application/json');
+$response = ['success' => false, 'error' => ''];
+
+error_log("Starting reviews_handler.php");
+
+if (!isset($conn) || !$conn) {
+    $response['error'] = 'Database connection failed: ' . mysqli_connect_error();
+    error_log("Database connection failed: " . mysqli_connect_error());
+} elseif (!isset($_SESSION["logged_in"]) || !$_SESSION["logged_in"]) {
+    $response['error'] = 'Please sign in to submit a review.';
+    error_log("User not logged in");
+} elseif (!isset($_SESSION["user_id"])) {
+    $response['error'] = 'User ID not set in session.';
+    error_log("User ID not set in session");
+} elseif ($_SERVER["REQUEST_METHOD"] !== "POST" || !isset($_POST["review_text"])) {
+    $response['error'] = 'Invalid request: Method=' . $_SERVER["REQUEST_METHOD"] . ', Missing review text';
+    error_log("Invalid request: Method=" . $_SERVER["REQUEST_METHOD"] . ", Missing review text");
+} else {
+    $user_id = (int)$_SESSION["user_id"];
+    $media_id = filter_var($_POST["media_id"] ?? '', FILTER_VALIDATE_INT);
+    $media_type = filter_var($_POST["media_type"] ?? '', FILTER_SANITIZE_STRING);
+    $review_text = filter_var($_POST["review_text"], FILTER_SANITIZE_STRING);
+
+    error_log("Processing review: user_id=$user_id, media_id=$media_id, media_type=$media_type, review_text=$review_text");
+
+    if ($media_id === false || !in_array($media_type, ['movie', 'tv']) || empty($review_text)) {
+        $response['error'] = 'Invalid review details: media_id=' . $media_id . ', media_type=' . $media_type . ', review_text=' . $review_text;
+        error_log("Invalid review details: media_id=$media_id, media_type=$media_type, review_text=$review_text");
+    } else {
+        // Insert review into database
+        $stmt = $conn->prepare("INSERT INTO reviews (user_id, media_id, media_type, review_text) VALUES (?, ?, ?, ?)");
+        if (!$stmt) {
+            $response['error'] = 'Prepare failed: ' . mysqli_error($conn);
+            error_log("Insert prepare failed: " . mysqli_error($conn));
+        } else {
+            $stmt->bind_param("iiss", $user_id, $media_id, $media_type, $review_text);
+            if ($stmt->execute()) {
+                $response['success'] = true;
+                error_log("Review added: user_id=$user_id, media_id=$media_id, media_type=$media_type");
+            } else {
+                $response['error'] = 'Insert failed: ' . $stmt->error;
+                error_log("Insert execute failed: " . $stmt->error);
+            }
+            $stmt->close();
+        }
+    }
+}
+
+echo json_encode($response);
+exit();
+?>
+
+=== /opt/lampp/htdocs/iwatch/script.js ===
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('DOMContentLoaded fired - script.js fully loaded');
+
+    // Navbar functionality
+    const navbarToggler = document.querySelector('.navbar-toggler');
+    const navbar = document.querySelector('.navbar');
+
+    if (navbarToggler && navbar) {
+        navbarToggler.addEventListener('click', () => {
+            navbar.classList.toggle('active');
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!navbar.contains(e.target) && !navbarToggler.contains(e.target) && navbar.classList.contains('active')) {
+                navbar.classList.remove('active');
+            }
+        });
+
+        function adjustLayout() {
+            const navbarNav = document.querySelector('.navbar-nav');
+            if (!navbarNav) return;
+            if (window.innerWidth <= 800) {
+                navbarNav.style.display = navbar.classList.contains('active') ? 'flex' : 'none';
+            } else {
+                navbarNav.style.display = 'flex';
+                navbar.classList.remove('active');
+            }
+        }
+        window.addEventListener('resize', adjustLayout);
+        adjustLayout();
+    }
+
+    // Generic form submission handler
+    function handleFormSubmission(formId, url, successCallback) {
+        const form = document.getElementById(formId);
+        if (form) {
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+
+                if (!form.checkValidity()) {
+                    e.stopPropagation();
+                    form.classList.add('was-validated');
+                    return;
+                }
+
+                const formData = new FormData(form);
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    const data = await response.json();
+
+                    if (data.success) {
+                        successCallback(form, data);
+                    } else {
+                        alert(data.error || 'An error occurred.');
+                    }
+                } catch (error) {
+                    console.error(`${formId} error:`, error);
+                    alert('A network error occurred. Please try again.');
+                }
+            });
+        }
+    }
+
+    // Sign-in form
+    handleFormSubmission('signInForm', '/iwatch/signin_handler.php', (form) => {
+        window.location.href = '/iwatch/index.php';
+    });
+
+    // Sign-up form
+    handleFormSubmission('signUpForm', '/iwatch/signup_handler.php', (form) => {
+        alert('Sign-up successful! Please sign in.');
+        form.closest('.modal').querySelector('.btn-close').click();
+        form.reset();
+        form.classList.remove('was-validated');
+    });
+
+    // Review forms
+    const reviewSuccessCallback = (form) => {
+        alert('Review submitted successfully!');
+        form.reset();
+        form.classList.remove('was-validated');
+    };
+    handleFormSubmission('reviewFormMovie', '/iwatch/reviews_handler.php', reviewSuccessCallback);
+    handleFormSubmission('reviewFormSeries', '/iwatch/reviews_handler.php', reviewSuccessCallback);
+
+    // Favorite button handler
+    document.querySelectorAll('.btn-favorite').forEach(button => {
+        button.addEventListener('click', async (e) => {
+            e.preventDefault();
+            const mediaId = button.dataset.mediaId;
+            const mediaType = button.dataset.mediaType === 'movie' ? 'movie' : 'tv';
+            const isFavorited = button.classList.contains('active');
+    
+            const formData = new FormData();
+            formData.append('media_id', mediaId);
+            formData.append('media_type', mediaType);
+            formData.append('action', 'toggle');
+    
+            try {
+                const response = await fetch('/iwatch/favorites_handler.php', {
+                    method: 'POST',
+                    body: formData
+                });
+    
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const data = await response.json();
+    
+                if (data.success) {
+                    if (data.isFavorited) {
+                        button.textContent = 'Favorited';
+                        button.classList.add('active');
+                        button.disabled = false;
+                        alert('Added to favorites!');
+                    } else {
+                        button.textContent = 'Add to Favorites';
+                        button.classList.remove('active');
+                        button.disabled = false;
+                        alert('Removed from favorites!');
+                    }
+                } else {
+                    alert(data.error || 'Could not update favorites.');
+                }
+            } catch (error) {
+                console.error('Favorite error:', error);
+                alert('An error occurred. Please try again.');
+            }
+        });
+    });
+
+    // Watchlist handlers
+    console.log('Searching for .btn-watchlist-status elements');
+    document.querySelectorAll('.btn-watchlist-status').forEach(select => {
+        select.addEventListener('change', async () => {
+            const mediaId = select.dataset.mediaId;
+            const mediaType = select.dataset.mediaType;
+            const status = select.value;
+            const action = status ? 'update' : 'remove';
+
+            const formData = new FormData();
+            formData.append('media_id', mediaId);
+            formData.append('media_type', mediaType);
+            formData.append('status', status);
+            formData.append('action', action);
+
+            console.log('Sending watchlist request:', { mediaId, mediaType, status, action });
+
+            try {
+                const response = await fetch('/iwatch/watchlist_handler.php', {
+                    method: 'POST',
+                    body: formData
+                });
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const data = await response.json();
+                console.log('Response:', data);
+
+                if (data.success) {
+                    alert(status ? `Updated to ${status}!` : 'Removed from watchlist!');
+                    location.reload();
+                } else {
+                    alert(data.error || 'Error updating watchlist.');
+                }
+            } catch (error) {
+                console.error('Watchlist update error:', error);
+                alert('An error occurred.');
+            }
+        });
+    });
+
+    document.querySelectorAll('.btn-remove-watchlist').forEach(button => {
+        button.addEventListener('click', async () => {
+            if (!confirm('Are you sure you want to remove this from your watchlist?')) return;
+
+            const mediaId = button.dataset.mediaId;
+            const mediaType = button.dataset.mediaType;
+
+            const formData = new FormData();
+            formData.append('media_id', mediaId);
+            formData.append('media_type', mediaType);
+            formData.append('status', '');
+            formData.append('action', 'remove');
+
+            console.log('Sending remove request:', { mediaId, mediaType });
+
+            try {
+                const response = await fetch('/iwatch/watchlist_handler.php', {
+                    method: 'POST',
+                    body: formData
+                });
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const data = await response.json();
+                console.log('Response:', data);
+
+                if (data.success) {
+                    alert('Removed from watchlist!');
+                    button.closest('.grid-item').remove();
+                } else {
+                    alert(data.error || 'Could not remove from watchlist.');
+                }
+            } catch (error) {
+                console.error('Watchlist remove error:', error);
+                alert('An error occurred. Please try again.');
+            }
+        });
+    });
+
+    // Search and genre functionality
+    const searchForm = document.getElementById('searchForm');
+    const searchInput = document.querySelector('input[name="query"]');
+    const selectedGenresInput = document.getElementById('selectedGenresInput');
+    const selectedGenresContainer = document.getElementById('selectedGenres');
+    const clearGenresBtn = document.getElementById('clearGenres');
+
+    if (searchForm && searchInput) {
+        searchForm.addEventListener('submit', (e) => {
+            const query = searchInput.value.trim();
+            const genres = selectedGenresInput ? selectedGenresInput.value : '';
+            if (!query && !genres) {
+                e.preventDefault();
+                alert('Please enter a search query or select at least one genre.');
+            }
+        });
+    }
+
+    if (selectedGenresInput && selectedGenresContainer) {
+        document.querySelectorAll('.genre-item').forEach(item => {
+            item.addEventListener('click', (e) => {
+                e.preventDefault(); // Prevent default anchor behavior
+                const genreId = item.dataset.genreId;
+                let genresArray = selectedGenresInput.value ? selectedGenresInput.value.split(',').filter(Boolean) : [];
+
+                if (!genresArray.includes(genreId)) {
+                    genresArray.push(genreId);
+                    selectedGenresInput.value = genresArray.join(',');
+
+                    const genreBadge = document.createElement('span');
+                    genreBadge.className = 'badge bg-danger d-flex align-items-center';
+                    genreBadge.innerHTML = `${item.textContent} <button type="button" class="btn-close btn-close-white remove-genre ms-2" data-genre-id="${genreId}"></button>`;
+                    selectedGenresContainer.appendChild(genreBadge);
+
+                    searchForm.submit(); // Trigger search immediately
+                }
+            });
+        });
+
+        selectedGenresContainer.addEventListener('click', (event) => {
+            if (event.target.classList.contains('remove-genre')) {
+                const genreIdToRemove = event.target.dataset.genreId;
+                let genresArray = selectedGenresInput.value.split(',').filter(g => g !== genreIdToRemove);
+                selectedGenresInput.value = genresArray.join(',');
+                event.target.parentElement.remove();
+                searchForm.submit(); // Trigger search on removal
+            }
+        });
+
+        if (clearGenresBtn) {
+            clearGenresBtn.addEventListener('click', () => {
+                selectedGenresInput.value = '';
+                selectedGenresContainer.innerHTML = '';
+                searchForm.submit(); // Trigger search on clear
+            });
+        }
+    }
+    
+});
+
+=== /opt/lampp/htdocs/iwatch/index.php ===
+<?php
+session_start();
+require "config.php";
+
+// Fetch popular and top-rated content
+$popularMoviesUrl = "https://api.themoviedb.org/3/movie/popular?api_key=" . $tmdb_api_key;
+$popularMoviesResponse = getCachedApiResponse($popularMoviesUrl);
+$popularMovies = json_decode($popularMoviesResponse, true)["results"] ?? [];
+
+$popularSeriesUrl = "https://api.themoviedb.org/3/tv/popular?api_key=" . $tmdb_api_key;
+$popularSeriesResponse = getCachedApiResponse($popularSeriesUrl);
+$popularSeries = json_decode($popularSeriesResponse, true)["results"] ?? [];
+
+$topRatedMoviesUrl = "https://api.themoviedb.org/3/movie/top_rated?api_key=" . $tmdb_api_key;
+$topRatedMoviesResponse = getCachedApiResponse($topRatedMoviesUrl);
+$topRatedMovies = json_decode($topRatedMoviesResponse, true)["results"] ?? [];
+
+$topRatedSeriesUrl = "https://api.themoviedb.org/3/tv/top_rated?api_key=" . $tmdb_api_key;
+$topRatedSeriesResponse = getCachedApiResponse($topRatedSeriesUrl);
+$topRatedSeries = json_decode($topRatedSeriesResponse, true)["results"] ?? [];
+
+// Recommendations for logged-in users
+$recommendations = [];
+if (isset($_SESSION["logged_in"]) && $_SESSION["logged_in"] && isset($conn)) {
+    $stmt = $conn->prepare("SELECT media_id, media_type FROM favorites WHERE user_id = ? ORDER BY created_at DESC LIMIT 1");
+    $stmt->bind_param("i", $_SESSION["user_id"]);
+    $stmt->execute();
+    $favorite = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    if ($favorite) {
+        $media_id = $favorite['media_id'];
+        $media_type = $favorite['media_type'];
+        $recUrl = "https://api.themoviedb.org/3/$media_type/$media_id/similar?api_key=$tmdb_api_key";
+        $recResponse = getCachedApiResponse($recUrl);
+        $recData = json_decode($recResponse, true);
+        $recommendations = $recData["results"] ?? [];
+        foreach ($recommendations as &$rec) {
+            $rec['media_type'] = $media_type;
+        }
+    }
+}
+?>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>iWatch - Home</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="styles.css" rel="stylesheet">
+</head>
+<body>
+<?php include 'navbar.php'; ?>
+
+    <div class="container mt-4">
+        <!-- Section: Recommended for You -->
+        <?php if (!empty($recommendations)): ?>
+            <h2 class="section-title">Recommended for You</h2>
+            <div class="scroll-container">
+                <div class="grid-container">
+                    <?php
+                    foreach ($recommendations as $rec) {
+                        $poster = $rec["poster_path"] ? "https://image.tmdb.org/t/p/w500" . $rec["poster_path"] : "https://via.placeholder.com/200x300?text=No+Poster";
+                        $rating = isset($rec["vote_average"]) ? htmlspecialchars($rec["vote_average"]) : "N/A";
+                        $title = htmlspecialchars($rec["title"] ?? $rec["name"] ?? "Unknown");
+                        $link = $rec["media_type"] == "movie" ? "moviedetails.php?id=" . $rec["id"] : "seriesdetails.php?id=" . $rec["id"];
+                        echo '<div class="grid-item">';
+                        echo '<a href="' . $link . '">';
+                        echo '<img src="' . $poster . '" alt="' . $title . '" loading="lazy">';
+                        echo '<div class="overlay">';
+                        echo '<div class="rating">' . $rating . '/10</div>';
+                        echo '<div class="title">' . $title . '</div>';
+                        echo '<span class="play-btn">Play</span>';
+                        echo '</div>';
+                        echo '</a>';
+                        echo '</div>';
+                    }
+                    ?>
+                </div>
+            </div>
+        <?php endif; ?>
+
+        <!-- Section: Popular Movies -->
+        <h2 class="section-title">Popular Movies</h2>
+        <div class="scroll-container">
+            <div class="grid-container">
+                <?php
+                foreach ($popularMovies as $movie) {
+                    $poster = $movie["poster_path"] ? "https://image.tmdb.org/t/p/w500" . $movie["poster_path"] : "https://via.placeholder.com/200x300?text=No+Poster";
+                    $rating = isset($movie["vote_average"]) ? htmlspecialchars($movie["vote_average"]) : "N/A";
+                    $title = htmlspecialchars($movie["title"]);
+                    echo '<div class="grid-item">';
+                    echo '<a href="moviedetails.php?id=' . $movie["id"] . '">';
+                    echo '<img src="' . $poster . '" alt="' . $title . '" loading="lazy">';
+                    echo '<div class="overlay">';
+                    echo '<div class="rating">' . $rating . '/10</div>';
+                    echo '<div class="title">' . $title . '</div>';
+                    echo '<span class="play-btn">Play</span>';
+                    echo '</div>';
+                    echo '</a>';
+                    echo '</div>';
+                }
+                ?>
+            </div>
+        </div>
+
+        <!-- Section: Popular TV Series -->
+        <h2 class="section-title">Popular TV Series</h2>
+        <div class="scroll-container">
+            <div class="grid-container">
+                <?php
+                foreach ($popularSeries as $serie) {
+                    $poster = $serie["poster_path"] ? "https://image.tmdb.org/t/p/w500" . $serie["poster_path"] : "https://via.placeholder.com/200x300?text=No+Poster";
+                    $rating = isset($serie["vote_average"]) ? htmlspecialchars($serie["vote_average"]) : "N/A";
+                    $name = htmlspecialchars($serie["name"]);
+                    echo '<div class="grid-item">';
+                    echo '<a href="seriesdetails.php?id=' . $serie["id"] . '">';
+                    echo '<img src="' . $poster . '" alt="' . $name . '" loading="lazy">';
+                    echo '<div class="overlay">';
+                    echo '<div class="rating">' . $rating . '/10</div>';
+                    echo '<div class="title">' . $name . '</div>';
+                    echo '<span class="play-btn">Play</span>';
+                    echo '</div>';
+                    echo '</a>';
+                    echo '</div>';
+                }
+                ?>
+            </div>
+        </div>
+
+        
+        <!-- Section: Top Rated Movies -->
+        <h2 class="section-title">Top Rated Movies</h2>
+        <div class="scroll-container">
+            <div class="grid-container">
+                <?php
+                foreach ($topRatedMovies as $movie) {
+                    $poster = $movie["poster_path"] ? "https://image.tmdb.org/t/p/w500" . $movie["poster_path"] : "https://via.placeholder.com/200x300?text=No+Poster";
+                    $rating = isset($movie["vote_average"]) ? htmlspecialchars($movie["vote_average"]) : "N/A";
+                    $title = htmlspecialchars($movie["title"]);
+                    echo '<div class="grid-item">';
+                    echo '<a href="moviedetails.php?id=' . $movie["id"] . '">';
+                    echo '<img src="' . $poster . '" alt="' . $title . '" loading="lazy">';
+                    echo '<div class="overlay">';
+                    echo '<div class="rating">' . $rating . '/10</div>';
+                    echo '<div class="title">' . $title . '</div>';
+                    echo '<span class="play-btn">Play</span>';
+                    echo '</div>';
+                    echo '</a>';
+                    echo '</div>';
+                }
+                ?>
+            </div>
+        </div>
+
+        <!-- Section: Top Rated TV Series -->
+        <h2 class="section-title">Top Rated TV Series</h2>
+        <div class="scroll-container">
+            <div class="grid-container">
+                <?php
+                foreach ($topRatedSeries as $serie) {
+                    $poster = $serie["poster_path"] ? "https://image.tmdb.org/t/p/w500" . $serie["poster_path"] : "https://via.placeholder.com/200x300?text=No+Poster";
+                    $rating = isset($serie["vote_average"]) ? htmlspecialchars($serie["vote_average"]) : "N/A";
+                    $name = htmlspecialchars($serie["name"]);
+                    echo '<div class="grid-item">';
+                    echo '<a href="seriesdetails.php?id=' . $serie["id"] . '">';
+                    echo '<img src="' . $poster . '" alt="' . $name . '" loading="lazy">';
+                    echo '<div class="overlay">';
+                    echo '<div class="rating">' . $rating . '/10</div>';
+                    echo '<div class="title">' . $name . '</div>';
+                    echo '<span class="play-btn">Play</span>';
+                    echo '</div>';
+                    echo '</a>';
+                    echo '</div>';
+                }
+                ?>
+            </div>
+        </div>
+
+        <?php include 'modals.php'; ?>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
+
+=== /opt/lampp/htdocs/iwatch/logout.php ===
+<?php
+session_start();
+session_unset();
+session_destroy();
+header("Location: index.php");
+exit();
+?>
+
+=== /opt/lampp/htdocs/iwatch/seriesdetails.php ===
+<?php
+session_start();
+require "config.php";
+
+// Prevent caching
+header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
+header("Pragma: no-cache");
+header("Expires: 0");
+
+$id = isset($_GET["id"]) ? intval($_GET["id"]) : 0;
+if ($id <= 0) {
+    header("Location: index.php");
+    exit;
+}
+
+// Fetch series details
+$url = "https://api.themoviedb.org/3/tv/$id?api_key=$tmdb_api_key";
+$response = getCachedApiResponse($url);
+$series = json_decode($response, true);
+
+// Fetch cast (credits)
+$castUrl = "https://api.themoviedb.org/3/tv/$id/credits?api_key=$tmdb_api_key";
+$castResponse = getCachedApiResponse($castUrl);
+$castData = json_decode($castResponse, true);
+
+// Check if series exists and handle errors
+if (isset($series["status_code"])) {
+    $error = $series["status_message"] ?? "An error occurred while fetching series details.";
+} elseif (!$series || empty($series["name"])) {
+    $error = "Series not found.";
+}
+
+// Check favorites and watchlist status
+$isFavorited = false;
+$watchlistStatus = null;
+if (isset($_SESSION["logged_in"]) && $_SESSION["logged_in"] === true && isset($_SESSION["user_id"])) {
+    $user_id = (int)$_SESSION["user_id"];
+    
+    // Check if series is favorited
+    $stmt = $conn->prepare("SELECT COUNT(*) FROM favorites WHERE user_id = ? AND media_id = ? AND media_type = 'tv'");
+    $stmt->bind_param("ii", $user_id, $id);
+    $stmt->execute();
+    $isFavorited = $stmt->get_result()->fetch_row()[0] > 0;
+    $stmt->close();
+
+    // Check watchlist status
+    $stmt = $conn->prepare("SELECT status FROM watchlist WHERE user_id = ? AND media_id = ? AND media_type = 'tv'");
+    $stmt->bind_param("ii", $user_id, $id);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    if ($row = $result->fetch_assoc()) {
+        $watchlistStatus = $row['status'];
+    }
+    $stmt->close();
+}
+?>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>iWatch - <?php echo htmlspecialchars($series["name"] ?? "Series Details"); ?></title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="styles.css" rel="stylesheet">
+</head>
+<body>
+<?php include 'navbar.php'; ?>
+<div class="container mt-4">
+    <h2 class="section-title">SERIES DETAILS</h2>
+    <div class="content-box">
+        <?php if (isset($error)): ?>
+            <div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div>
+        <?php else: ?>
+            <div class="row">
+                <div class="col-md-4">
+                    <img src="<?php echo $series["poster_path"] ? 'https://image.tmdb.org/t/p/w500' . $series["poster_path"] : 'https://via.placeholder.com/300x450?text=No+Poster'; ?>" 
+                         alt="<?php echo htmlspecialchars($series["name"]); ?>" 
+                         class="poster img-fluid" 
+                         loading="lazy">
+                </div>
+                <div class="col-md-8 details">
+                    <h2><?php echo htmlspecialchars($series["name"]); ?> (<?php echo htmlspecialchars(substr($series["first_air_date"] ?? '', 0, 4)); ?>)</h2>
+                    <p><strong>Rating:</strong> <?php echo htmlspecialchars($series["vote_average"] ?? 'N/A'); ?>/10 (<?php echo htmlspecialchars($series["vote_count"] ?? '0'); ?> votes)</p>
+                    <p><strong>First Air Date:</strong> <?php echo htmlspecialchars($series["first_air_date"] ?? 'N/A'); ?></p>
+                    <div class="genres">
+                        <?php foreach ($series["genres"] ?? [] as $genre): ?>
+                            <span class="badge bg-secondary me-1"><?php echo htmlspecialchars($genre["name"]); ?></span>
+                        <?php endforeach; ?>
+                    </div>
+                    <p><strong>Overview:</strong> <?php echo htmlspecialchars($series["overview"] ?? 'No overview available'); ?></p>
+                    <p><strong>Number of Seasons:</strong> <?php echo htmlspecialchars($series["number_of_seasons"] ?? 'N/A'); ?></p>
+                    <p><strong>Number of Episodes:</strong> <?php echo htmlspecialchars($series["number_of_episodes"] ?? 'N/A'); ?></p>
+                    
+                    <div class="cast">
+                        <h4>Cast</h4>
+                        <p>
+                            <?php
+                            $cast = array_slice($castData["cast"] ?? [], 0, 5);
+                            $castNames = array_map(function($actor) { 
+                                return htmlspecialchars($actor["name"]) . ' as ' . htmlspecialchars($actor["character"]); 
+                            }, $cast);
+                            echo implode(", ", $castNames) ?: 'No cast information available';
+                            ?>
+                        </p>
+                    </div>
+
+                    <div class="action-buttons mt-3">
+                        <a href="#" class="btn btn-red me-2">Watch Now</a>
+                        <?php if (isset($_SESSION["logged_in"]) && $_SESSION["logged_in"] === true): ?>
+                            <button class="btn btn-outline-primary btn-favorite <?php echo $isFavorited ? 'active' : ''; ?>" 
+                                    data-media-id="<?php echo $id; ?>" 
+                                    data-media-type="tv">
+                                <?php echo $isFavorited ? 'Favorited' : 'Add to Favorites'; ?>
+                            </button>
+                            <?php error_log("watchlistStatus for series ID $id: " . var_export($watchlistStatus, true)); ?>
+                            <select class="form-select d-inline-block w-auto me-2 btn-watchlist-status" 
+                                    data-media-id="<?php echo $id; ?>" 
+                                    data-media-type="tv">
+                                <option value="" <?php echo !$watchlistStatus ? 'selected' : ''; ?>>
+                                    <?php echo $watchlistStatus === null ? 'Add to Watchlist' : 'Remove from Watchlist'; ?>
+                                </option>
+                                <option value="planned" <?php echo $watchlistStatus === 'planned' ? 'selected' : ''; ?>>Planned</option>
+                                <option value="watching" <?php echo $watchlistStatus === 'watching' ? 'selected' : ''; ?>>Watching</option>
+                                <option value="completed" <?php echo $watchlistStatus === 'completed' ? 'selected' : ''; ?>>Completed</option>
+                            </select>
+                        <?php endif; ?>
+                    </div>
+
+                    <?php if (isset($_SESSION["logged_in"]) && $_SESSION["logged_in"] === true): ?>
+                        <div class="review-section mt-4">
+                            <h3>Leave a Review</h3>
+                            <form id="reviewFormSeries" class="needs-validation" novalidate>
+                                <div class="mb-3">
+                                    <textarea name="review_text" 
+                                              class="form-control" 
+                                              placeholder="Write your review here" 
+                                              required 
+                                              minlength="10" 
+                                              maxlength="500"></textarea>
+                                    <div class="invalid-feedback">
+                                        Review must be between 10 and 500 characters.
+                                    </div>
+                                </div>
+                                <input type="hidden" name="media_id" value="<?php echo $id; ?>">
+                                <input type="hidden" name="media_type" value="tv">
+                                <button type="submit" class="btn btn-review">Submit Review</button>
+                            </form>
+                        </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+        <?php endif; ?>
+    </div>
+
+    <?php include 'modals.php'; ?>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="script.js?v=<?php echo filemtime('script.js'); ?>"></script>
+</body>
+</html>
+
+=== /opt/lampp/htdocs/iwatch/search.php ===
+<?php
+session_start();
+require "config.php";
+
+$query = isset($_GET['query']) ? trim($_GET['query']) : '';
+$genres = isset($_GET['genres']) ? array_filter(explode(',', trim($_GET['genres'])), 'strlen') : [];
+$searchResults = [];
+$errorMessage = '';
+
+error_log("Search query: '$query', genres: " . implode(',', $genres));
+
+// Fetch genre list for movies
+$genreUrl = "https://api.themoviedb.org/3/genre/movie/list?api_key=" . $tmdb_api_key;
+$genreResponse = getCachedApiResponse($genreUrl);
+$genresList = json_decode($genreResponse, true)["genres"] ?? [];
+
+if ($query || !empty($genres)) {
+    if ($query) {
+        $url = "https://api.themoviedb.org/3/search/multi?api_key=" . $tmdb_api_key . "&query=" . urlencode($query);
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+        // Uncomment and configure if behind a proxy
+        // curl_setopt($ch, CURLOPT_PROXY, 'http://proxy.example.com:port');
+        $response = curl_exec($ch);
+        if ($response === false) {
+            $error = curl_error($ch);
+            error_log("cURL error for URL '$url': $error");
+            $errorMessage = "Unable to connect to the API. Please check your internet connection.";
+            $searchResults = [];
+        } else {
+            $data = json_decode($response, true);
+            if ($data === null) {
+                error_log("JSON decode failed for response: " . substr($response, 0, 200));
+                $errorMessage = "Invalid API response.";
+                $searchResults = [];
+            } else {
+                error_log("Raw API response: " . substr($response, 0, 200));
+                $searchResults = $data["results"] ?? [];
+                
+                $searchResults = array_filter($searchResults, function ($result) {
+                    $type = $result['media_type'] ?? '';
+                    return $type === 'movie' || $type === 'tv';
+                });
+                
+                if (!empty($genres)) {
+                    $searchResults = array_filter($searchResults, function ($result) use ($genres) {
+                        $mediaGenres = $result['genre_ids'] ?? [];
+                        $match = !empty(array_intersect($genres, $mediaGenres));
+                        return $match;
+                    });
+                }
+            }
+        }
+        curl_close($ch);
+    } elseif (!empty($genres)) {
+        $movieResults = [];
+        $tvResults = [];
+        
+        $movieUrl = "https://api.themoviedb.org/3/discover/movie?api_key=" . $tmdb_api_key . "&with_genres=" . implode(',', array_map('intval', $genres));
+        $movieResponse = getCachedApiResponse($movieUrl);
+        $movieResults = json_decode($movieResponse, true)["results"] ?? [];
+        foreach ($movieResults as &$result) {
+            $result['media_type'] = 'movie';
+        }
+
+        $tvGenreMap = [
+            28 => 10759, 12 => 10759, 16 => 16, 35 => 35, 80 => 80, 99 => 99, 18 => 18, 10751 => 10751,
+            14 => 10765, 36 => 10768, 27 => 9648, 9648 => 9648, 10749 => 10766, 878 => 10765, 53 => 10759,
+            10752 => 10768, 37 => 37
+        ];
+        $tvGenres = array_filter(array_map(function ($g) use ($tvGenreMap) { return $tvGenreMap[$g] ?? null; }, $genres));
+        if (!empty($tvGenres)) {
+            $tvUrl = "https://api.themoviedb.org/3/discover/tv?api_key=" . $tmdb_api_key . "&with_genres=" . implode(',', array_unique($tvGenres));
+            $tvResponse = getCachedApiResponse($tvUrl);
+            $tvResults = json_decode($tvResponse, true)["results"] ?? [];
+            foreach ($tvResults as &$result) {
+                $result['media_type'] = 'tv';
+            }
+        }
+
+        $searchResults = array_merge($movieResults, $tvResults);
+        shuffle($searchResults);
+    }
+
+    if (empty($searchResults) && !$errorMessage) {
+        error_log("No results after processing for query: '$query', genres: " . implode(',', $genres));
+    }
+}
+?>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Search - iWatch</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="styles.css" rel="stylesheet">
+</head>
+<body>
+<?php include 'navbar.php'; ?>
+
+    <div class="container mt-4">
+        <h1>Search</h1>
+        <form id="searchForm" method="GET" action="search.php" class="mb-4">
+            <div class="input-group mb-3">
+                <input type="text" class="form-control" name="query" placeholder="Search for movies or TV series..." value="<?php echo htmlspecialchars($query); ?>">
+                <button type="submit" class="btn btn-red">Search</button>
+            </div>
+            <div class="mb-3">
+                <label for="genres" class="form-label">Filter by Genres:</label>
+                <div class="d-flex align-items-center gap-2">
+                    <div class="dropdown">
+                        <button class="btn btn-secondary dropdown-toggle" type="button" id="genreDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                            Select Genres
+                        </button>
+                        <ul class="dropdown-menu" aria-labelledby="genreDropdown">
+                            <?php foreach ($genresList as $genre): ?>
+                                <li><a class="dropdown-item genre-item" href="#" data-genre-id="<?php echo $genre['id']; ?>"><?php echo htmlspecialchars($genre['name']); ?></a></li>
+                            <?php endforeach; ?>
+                        </ul>
+                    </div>
+                    <button type="button" class="btn btn-outline-danger" id="clearGenres">Clear Genres</button>
+                </div>
+                <input type="hidden" id="selectedGenresInput" name="genres" value="<?php echo htmlspecialchars(implode(',', $genres)); ?>">
+                <div id="selectedGenres" class="mt-2 d-flex flex-wrap gap-2">
+                    <?php foreach ($genres as $genreId): ?>
+                        <?php
+                        $genreMatch = array_filter($genresList, function ($g) use ($genreId) { return $g['id'] == $genreId; });
+                        $genreName = !empty($genreMatch) ? $genreMatch[array_key_first($genreMatch)]['name'] : '';
+                        if ($genreName): ?>
+                            <span class="badge bg-danger d-flex align-items-center">
+                                <?php echo htmlspecialchars($genreName); ?>
+                                <button type="button" class="btn-close btn-close-white remove-genre ms-2" data-genre-id="<?php echo $genreId; ?>"></button>
+                            </span>
+                        <?php endif; ?>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+        </form>
+
+        <?php if ($query || !empty($genres)): ?>
+            <h2 class="section-title">Search Results<?php echo $query ? ' for "' . htmlspecialchars($query) . '"' : ''; ?><?php echo !empty($genres) ? ' in selected genres' : ''; ?></h2>
+            <?php if ($errorMessage): ?>
+                <p class="text-danger"><?php echo $errorMessage; ?></p>
+            <?php else: ?>
+                <div class="scroll-container">
+                    <div class="grid-container">
+                        <?php foreach ($searchResults as $result): ?>
+                            <?php
+                            $media_type = $result["media_type"];
+                            $poster = $result["poster_path"] ? "https://image.tmdb.org/t/p/w500" . $result["poster_path"] : "https://via.placeholder.com/200x300?text=No+Poster";
+                            $rating = isset($result["vote_average"]) ? htmlspecialchars($result["vote_average"]) : "N/A";
+                            $title = $media_type == 'movie' ? htmlspecialchars($result["title"] ?? 'Unknown Movie') : htmlspecialchars($result["name"] ?? 'Unknown Series');
+                            $link = $media_type == 'movie' ? "moviedetails.php?id=" . $result["id"] : "seriesdetails.php?id=" . $result["id"];
+                            ?>
+                            <div class="grid-item">
+                                <a href="<?php echo $link; ?>">
+                                    <img src="<?php echo $poster; ?>" alt="<?php echo $title; ?>" loading="lazy">
+                                    <div class="overlay">
+                                        <div class="rating"><?php echo $rating; ?>/10</div>
+                                        <div class="title"><?php echo $title; ?></div>
+                                        <span class="play-btn">Play</span>
+                                    </div>
+                                </a>
+                            </div>
+                        <?php endforeach; ?>
+                        <?php if (empty($searchResults)): ?>
+                            <p>No results found.</p>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            <?php endif; ?>
+        <?php endif; ?>
+
+        <?php include 'modals.php'; ?>
+    </div>
+
+    <script defer src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script defer src="script.js?v=<?php echo filemtime('script.js'); ?>"></script>
+</body>
+</html>
+
+=== /opt/lampp/htdocs/iwatch/auth.php ===
+<?php
+function signIn($conn) {
+    $username = trim($_POST["username"] ?? '');
+    $password = trim($_POST["password"] ?? '');
+
+    if (empty($username) || empty($password)) {
+        return "Username and password are required.";
+    }
+
+    // Fetch user from database using mysqli
+    $stmt = mysqli_prepare($conn, "SELECT id, username, password FROM users WHERE username = ?");
+    if (!$stmt) {
+        error_log("Database error: " . mysqli_error($conn));
+        return "Database error: " . mysqli_error($conn);
+    }
+    mysqli_stmt_bind_param($stmt, "s", $username);
+    if (!mysqli_stmt_execute($stmt)) {
+        error_log("Query execution error: " . mysqli_stmt_error($stmt));
+        return "Query execution error.";
+    }
+    $result = mysqli_stmt_get_result($stmt);
+    $user = mysqli_fetch_assoc($result);
+    mysqli_stmt_close($stmt);
+
+    if ($user && password_verify($password, $user['password'])) {
+        $_SESSION["logged_in"] = true;
+        $_SESSION["username"] = $user['username'];
+        $_SESSION["user_id"] = $user['id'];
+        error_log("Sign-in successful for user: $username");
+        return false;
+    } else {
+        error_log("Invalid credentials for user: $username");
+        return "Invalid username or password.";
+    }
+}
+?>
+
+=== /opt/lampp/htdocs/iwatch/watchlist_handler.php ===
+<?php
+session_start();
+require "config.php";
+
+ob_start(); // Buffer output
+header('Content-Type: application/json');
+$response = ['success' => false, 'error' => ''];
+
+error_log("Received POST: " . json_encode($_POST));
+
+if (!isset($_SESSION["logged_in"]) || !$_SESSION["logged_in"]) {
+    $response['error'] = 'Please sign in to manage your watchlist.';
+} elseif (!isset($_SESSION["user_id"])) {
+    $response['error'] = 'User ID not set in session.';
+} elseif ($_SERVER["REQUEST_METHOD"] !== "POST") {
+    $response['error'] = 'Invalid request method.';
+} else {
+    $user_id = (int)$_SESSION["user_id"];
+    $action = $_POST["action"] ?? '';
+    $media_id = filter_var($_POST["media_id"] ?? '', FILTER_VALIDATE_INT);
+    $media_type = htmlspecialchars($_POST["media_type"] ?? '', ENT_QUOTES, 'UTF-8');
+    $status = htmlspecialchars($_POST["status"] ?? '', ENT_QUOTES, 'UTF-8');
+
+    error_log("Processed: user_id=$user_id, action=$action, media_id=$media_id, media_type=$media_type, status=$status");
+
+    if ($media_id === false || !in_array($media_type, ['movie', 'tv'])) {
+        $response['error'] = 'Invalid input.';
+    } elseif ($action == 'add' || $action == 'update') {
+        if (!in_array($status, ['planned', 'watching', 'completed'])) {
+            $response['error'] = 'Invalid status.';
+        } else {
+            // Fetch details from TMDb API
+            $url = "https://api.themoviedb.org/3/{$media_type}/{$media_id}?api_key={$tmdb_api_key}";
+            $api_response = getCachedApiResponse($url);
+            $data = json_decode($api_response, true);
+
+            if (!is_array($data) || isset($data['status_code'])) {
+                $response['error'] = 'Failed to fetch media details.';
+                error_log("API error for $url: " . ($data['status_message'] ?? 'No response'));
+            } else {
+                $title = $media_type == 'movie' ? ($data['title'] ?? 'Unknown Movie') : ($data['name'] ?? 'Unknown Series');
+                $poster_path = $data['poster_path'] ?? null;
+
+                // Check if entry exists, update or insert accordingly
+                $stmt = $conn->prepare("SELECT id FROM watchlist WHERE user_id = ? AND media_id = ? AND media_type = ?");
+                $stmt->bind_param("iis", $user_id, $media_id, $media_type);
+                $stmt->execute();
+                $result = $stmt->get_result();
+
+                if ($result->num_rows > 0) {
+                    // Update existing
+                    $stmt = $conn->prepare(
+                        "UPDATE watchlist SET status = ?, title = ?, poster_path = ?, updated_at = NOW() 
+                         WHERE user_id = ? AND media_id = ? AND media_type = ?"
+                    );
+                    $stmt->bind_param("sssiis", $status, $title, $poster_path, $user_id, $media_id, $media_type);
+                } else {
+                    // Insert new
+                    $stmt = $conn->prepare(
+                        "INSERT INTO watchlist (user_id, media_id, media_type, status, title, poster_path, created_at, updated_at) 
+                         VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())"
+                    );
+                    $stmt->bind_param("iissss", $user_id, $media_id, $media_type, $status, $title, $poster_path);
+                }
+
+                if ($stmt->execute()) {
+                    $response['success'] = true;
+                } else {
+                    $response['error'] = 'Database error: ' . $conn->error;
+                    error_log("DB error: " . $conn->error);
+                }
+                $stmt->close();
+            }
+        }
+    } elseif ($action == 'remove') {
+        $stmt = $conn->prepare("DELETE FROM watchlist WHERE user_id = ? AND media_id = ? AND media_type = ?");
+        $stmt->bind_param("iis", $user_id, $media_id, $media_type);
+        if ($stmt->execute()) {
+            if ($stmt->affected_rows > 0) {
+                $response['success'] = true;
+            } else {
+                $response['error'] = 'No such entry found.';
+            }
+        } else {
+            $response['error'] = 'Database error: ' . $conn->error;
+            error_log("DB error: " . $conn->error);
+        }
+        $stmt->close();
+    } else {
+        $response['error'] = 'Invalid action.';
+    }
+}
+
+ob_end_clean(); // Clear buffer
+echo json_encode($response);
+exit();
+?>
+
+=== /opt/lampp/htdocs/iwatch/watchlist.php ===
+<?php
+session_start();
+require "config.php";
+
+header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
+header("Pragma: no-cache");
+header("Expires: 0");
+
+$user_id = $_SESSION["user_id"] ?? null;
+$is_logged_in = isset($_SESSION["logged_in"]) && $_SESSION["logged_in"] === true;
+?>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Watchlist - iWatch</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <?php include 'navbar.php'; ?>
+
+    <div class="container mt-4">
+        <?php if ($is_logged_in): ?>
+            <h1>Your Watchlist</h1>
+            <?php
+            $sections = [
+                "watching" => "Currently Watching",
+                "planned" => "Planned",
+                "completed" => "Completed"
+            ];
+
+            foreach ($sections as $status_key => $status_label): ?>
+                <h2 class="section-title"><?php echo $status_label; ?></h2>
+                <div class="scroll-container">
+                    <div class="grid-container">
+                        <?php
+                        $stmt = $conn->prepare(
+                            "SELECT media_id, media_type, title, poster_path 
+                             FROM watchlist 
+                             WHERE user_id = ? AND status = ?"
+                        );
+                        $stmt->bind_param("is", $user_id, $status_key);
+                        $stmt->execute();
+                        $result = $stmt->get_result();
+                        
+                        if ($result->num_rows === 0) {
+                            echo '<p>No items in this section.</p>';
+                        } else {
+                            while ($row = $result->fetch_assoc()):
+                                $title = $row['title'] ?? ($row['media_type'] == 'movie' ? 'Unknown Movie' : 'Unknown Series');
+                                $poster = $row['poster_path'] 
+                                    ? "https://image.tmdb.org/t/p/w500{$row['poster_path']}" 
+                                    : 'https://via.placeholder.com/200x300?text=No+Poster';
+                        ?>
+                            <div class="grid-item">
+                                <a href="<?php echo $row['media_type'] == 'movie' ? 'moviedetails.php' : 'seriesdetails.php'; ?>?id=<?php echo $row['media_id']; ?>">
+                                    <img src="<?php echo htmlspecialchars($poster); ?>" alt="<?php echo htmlspecialchars($title); ?>" loading="lazy">
+                                    <div class="overlay">
+                                        <div class="title"><?php echo htmlspecialchars($title); ?></div>
+                                        <span class="play-btn">Play</span>
+                                    </div>
+                                </a>
+                                <select class="status-select form-select mt-2"
+                                        data-media-id="<?php echo $row['media_id']; ?>"
+                                        data-media-type="<?php echo $row['media_type']; ?>">
+                                    <option value="planned" <?php echo $status_key == "planned" ? "selected" : ""; ?>>Planning</option>
+                                    <option value="watching" <?php echo $status_key == "watching" ? "selected" : ""; ?>>Currently Watching</option>
+                                    <option value="completed" <?php echo $status_key == "completed" ? "selected" : ""; ?>>Completed</option>
+                                </select>
+                                <button class="btn btn-danger btn-remove-watchlist mt-2" 
+                                        data-media-id="<?php echo $row['media_id']; ?>" 
+                                        data-media-type="<?php echo $row['media_type']; ?>">Remove</button>
+                            </div>
+                        <?php endwhile; ?>
+                        <?php } $stmt->close(); ?>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+        <?php else: ?>
+            <div class="access-denied text-center mt-5">
+                <h4>You must sign in to access this page.</h4>
+                <p>Please <a href="#" class="access-link" data-bs-toggle="modal" data-bs-target="#signInModal">sign in</a> or <a href="#" class="access-link" data-bs-toggle="modal" data-bs-target="#signUpModal">sign up</a> to view your watchlist.</p>
+            </div>
+        <?php endif; ?>
+    </div>
+
+    <!-- Include Modals -->
+    <?php include 'modals.php'; ?> <!-- Assuming modals are in a separate file; adjust as needed -->
+
+    <script defer src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script defer src="script.js?v=<?php echo filemtime('script.js'); ?>"></script>
+</body>
+</html>
+
+=== /opt/lampp/htdocs/iwatch/signin_handler.php ===
+<?php
+session_start();
+require "config.php";
+require "auth.php";
+
+header('Content-Type: application/json');
+$response = ['success' => false, 'error' => ''];
+
+ini_set('display_errors', 0);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
+error_log("Starting signin_handler.php");
+
+if (!isset($conn) || !$conn) {
+    $response['error'] = 'Database connection failed.';
+    error_log("Database connection failed: " . mysqli_connect_error());
+} elseif ($_SERVER["REQUEST_METHOD"] === "POST") {
+    $signInResult = signIn($conn);
+    if ($signInResult === false) {
+        $response['success'] = true;
+        error_log("Sign-in successful: username=" . $_SESSION["username"]);
+    } else {
+        $response['error'] = $signInResult;
+        error_log("Sign-in failed: " . $signInResult);
+    }
+} else {
+    $response['error'] = 'Invalid request method.';
+    error_log("Invalid request method: " . $_SERVER["REQUEST_METHOD"]);
+}
+
+echo json_encode($response);
+exit();
+?>
+
+=== /opt/lampp/htdocs/iwatch/modals.php ===
+<?php
+session_start();
+require "config.php";
+
+header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
+header("Pragma: no-cache");
+header("Expires: 0");
+
+$user_id = $_SESSION["user_id"] ?? null;
+$is_logged_in = isset($_SESSION["logged_in"]) && $_SESSION["logged_in"] === true;
+?>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Watchlist - iWatch</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <?php include 'navbar.php'; ?>
+
+    <div class="container mt-4">
+        <?php if ($is_logged_in): ?>
+            <h1>Your Watchlist</h1>
+            <?php
+            $sections = [
+                "watching" => "Currently Watching",
+                "planned" => "Planned",
+                "completed" => "Completed"
+            ];
+
+            foreach ($sections as $status_key => $status_label): ?>
+                <h2 class="section-title"><?php echo $status_label; ?></h2>
+                <div class="scroll-container">
+                    <div class="grid-container">
+                        <?php
+                        $stmt = $conn->prepare(
+                            "SELECT media_id, media_type, title, poster_path 
+                             FROM watchlist 
+                             WHERE user_id = ? AND status = ?"
+                        );
+                        $stmt->bind_param("is", $user_id, $status_key);
+                        $stmt->execute();
+                        $result = $stmt->get_result();
+                        
+                        if ($result->num_rows === 0) {
+                            echo '<p>No items in this section.</p>';
+                        } else {
+                            while ($row = $result->fetch_assoc()):
+                                $title = $row['title'] ?? ($row['media_type'] == 'movie' ? 'Unknown Movie' : 'Unknown Series');
+                                $poster = $row['poster_path'] 
+                                    ? "https://image.tmdb.org/t/p/w500{$row['poster_path']}" 
+                                    : 'https://via.placeholder.com/200x300?text=No+Poster';
+                        ?>
+                            <div class="grid-item">
+                                <a href="<?php echo $row['media_type'] == 'movie' ? 'moviedetails.php' : 'seriesdetails.php'; ?>?id=<?php echo $row['media_id']; ?>">
+                                    <img src="<?php echo htmlspecialchars($poster); ?>" alt="<?php echo htmlspecialchars($title); ?>" loading="lazy">
+                                    <div class="overlay">
+                                        <div class="title"><?php echo htmlspecialchars($title); ?></div>
+                                        <span class="play-btn">Play</span>
+                                    </div>
+                                </a>
+                                <select class="status-select form-select mt-2"
+                                        data-media-id="<?php echo $row['media_id']; ?>"
+                                        data-media-type="<?php echo $row['media_type']; ?>">
+                                    <option value="planned" <?php echo $status_key == "planned" ? "selected" : ""; ?>>Planning</option>
+                                    <option value="watching" <?php echo $status_key == "watching" ? "selected" : ""; ?>>Currently Watching</option>
+                                    <option value="completed" <?php echo $status_key == "completed" ? "selected" : ""; ?>>Completed</option>
+                                </select>
+                                <button class="btn btn-danger btn-remove-watchlist mt-2" 
+                                        data-media-id="<?php echo $row['media_id']; ?>" 
+                                        data-media-type="<?php echo $row['media_type']; ?>">Remove</button>
+                            </div>
+                        <?php endwhile; ?>
+                        <?php } $stmt->close(); ?>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+        <?php else: ?>
+            <div class="access-denied text-center mt-5">
+                <h4>You must sign in to access this page.</h4>
+                <p>Please <a href="#" class="access-link" data-bs-toggle="modal" data-bs-target="#signInModal">sign in</a> or <a href="#" class="access-link" data-bs-toggle="modal" data-bs-target="#signUpModal">sign up</a> to view your watchlist.</p>
+            </div>
+        <?php endif; ?>
+    </div>
+
+    <!-- Include Modals -->
+    <?php include 'modals.php'; ?> <!-- Assuming modals are in a separate file; adjust as needed -->
+
+    <script defer src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script defer src="script.js?v=<?php echo filemtime('script.js'); ?>"></script>
+</body>
+</html>
+
+=== /opt/lampp/htdocs/iwatch/config.php ===
+<?php
+// Database configuration
+$host = "localhost";
+$username = "root";
+$password = "";
+$database = "iwatch";
+
+$tmdb_api_key = "c7163b9122c94f924c110fb3c14417d7";
+
+$conn = mysqli_connect($host, $username, $password, $database);
+if (!$conn) {
+    die("Database connection failed: " . mysqli_connect_error());
+}
+
+mysqli_set_charset($conn, "utf8");
+
+define("TMDB_API_KEY", $tmdb_api_key);
+
+date_default_timezone_set("UTC");
+function getCachedApiResponse($url) {
+    $cacheDir = 'cache/';
+    if (!is_dir($cacheDir)) {
+        mkdir($cacheDir, 0777, true);
+    }
+    
+    $cacheFile = $cacheDir . md5($url) . '.json';
+    $cacheLifetime = 24 * 3600; // 24 hours
+
+    if (file_exists($cacheFile) && (time() - filemtime($cacheFile)) < $cacheLifetime) {
+        return file_get_contents($cacheFile);
+    }
+
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 120); // Increased timeout
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 20); // Increased connection timeout
+    $response = curl_exec($ch);
+    
+    if (curl_errno($ch)) {
+        $error = curl_error($ch);
+        error_log("cURL error for URL '$url': $error");
+        curl_close($ch);
+        return '{}'; // Return empty JSON on failure
+    }
+    
+    curl_close($ch);
+    file_put_contents($cacheFile, $response);
+    return $response;
+}
+error_reporting(E_ALL);
+ini_set("display_errors", 1);
+?>
+
+=== /opt/lampp/htdocs/iwatch/navbar.php ===
+<nav class="navbar navbar-expand-lg">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="index.php">iWatch</a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon">☰</span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <ul class="navbar-nav me-auto">
+                <li class="nav-item">
+                    <a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'index.php' ? 'active' : ''; ?>" href="index.php">Home</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'movies.php' ? 'active' : ''; ?>" href="movies.php">Movies</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'tv-series.php' ? 'active' : ''; ?>" href="tv-series.php">TV Series</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'search.php' ? 'active' : ''; ?>" href="search.php">Search</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'watchlist.php' ? 'active' : ''; ?>" href="watchlist.php">Watchlist</a>
+                </li>
+            </ul>
+            <ul class="navbar-nav ms-auto">
+                <?php if (isset($_SESSION["logged_in"]) && $_SESSION["logged_in"] === true): ?>
+                    <li class="nav-item dropdown">
+                        <a class="username-nav dropdown-toggle nav-link" href="#" id="accountDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <?php echo htmlspecialchars($_SESSION["username"]); ?>
+                        </a>
+                        <ul class="dropdown-menu" aria-labelledby="accountDropdown">
+                            <li><a class="dropdown-item" href="profile.php">Profile</a></li>
+                            <li><a class="dropdown-item" href="watchlist.php">Watchlist</a></li>
+                            <li><a class="dropdown-item" href="logout.php">Log Out</a></li>
+                        </ul>
+                    </li>
+                <?php else: ?>
+                    <li class="nav-item">
+                        <a class="nav-link btn btn-red" href="#" data-bs-toggle="modal" data-bs-target="#signInModal">Sign In</a>
+                    </li>
+                <?php endif; ?>
+            </ul>
+        </div>
+    </div>
+</nav>
+
+=== /opt/lampp/htdocs/iwatch/tv-series.php ===
+<?php
+session_start();
+require "config.php";
+?>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TV Series - iWatch</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="styles.css" rel="stylesheet">
+</head>
+<body>
+<?php include 'navbar.php'; ?>
+
+    <div class="container mt-4">
+        <h2 class="section-title">Popular TV Series</h2>
+        <div class="scroll-container">
+            <div class="grid-container">
+                <?php
+                $url = "https://api.themoviedb.org/3/tv/popular?api_key=" . TMDB_API_KEY;
+                $response = getCachedApiResponse($url);
+                $series = json_decode($response, true)["results"] ?? [];
+                foreach ($series as $serie) {
+                    $poster = $serie["poster_path"] ? "https://image.tmdb.org/t/p/w500" . $serie["poster_path"] : "https://via.placeholder.com/200x300?text=No+Poster";
+                    $rating = isset($serie["vote_average"]) ? htmlspecialchars($serie["vote_average"]) : "N/A";
+                    $name = htmlspecialchars($serie["name"]);
+                    echo '<div class="grid-item">';
+                    echo '<a href="seriesdetails.php?id=' . $serie["id"] . '">';
+                    echo '<img src="' . $poster . '" alt="' . $name . '" loading="lazy">';
+                    echo '<div class="overlay">';
+                    echo '<div class="rating">' . $rating . '/10</div>';
+                    echo '<div class="title">' . $name . '</div>';
+                    echo '<span class="play-btn">Play</span>';
+                    echo '</div>';
+                    echo '</a>';
+                    echo '</div>';
+                }
+                ?>
+            </div>
+        </div>
+
+        <h2 class="section-title">Top Rated TV Series</h2>
+        <div class="scroll-container">
+            <div class="grid-container">
+                <?php
+                $url = "https://api.themoviedb.org/3/tv/top_rated?api_key=" . TMDB_API_KEY;
+                $response = getCachedApiResponse($url);
+                $topSeries = json_decode($response, true)["results"] ?? [];
+                foreach ($topSeries as $serie) {
+                    $poster = $serie["poster_path"] ? "https://image.tmdb.org/t/p/w500" . $serie["poster_path"] : "https://via.placeholder.com/200x300?text=No+Poster";
+                    $rating = isset($serie["vote_average"]) ? htmlspecialchars($serie["vote_average"]) : "N/A";
+                    $name = htmlspecialchars($serie["name"]);
+                    echo '<div class="grid-item">';
+                    echo '<a href="seriesdetails.php?id=' . $serie["id"] . '">';
+                    echo '<img src="' . $poster . '" alt="' . $name . '" loading="lazy">';
+                    echo '<div class="overlay">';
+                    echo '<div class="rating">' . $rating . '/10</div>';
+                    echo '<div class="title">' . $name . '</div>';
+                    echo '<span class="play-btn">Play</span>';
+                    echo '</div>';
+                    echo '</a>';
+                    echo '</div>';
+                }
+                ?>
+            </div>
+        </div>
+
+        <?php include 'modals.php'; ?>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
+
+=== /opt/lampp/htdocs/iwatch/styles.css ===
+/* General Styles */
+body {
+    background-color: #1a1a1a; /* Dark background */
+    color: #fff; /* White text */
+    font-family: Arial, sans-serif;
+    margin: 0;
+}
+
+/* Navbar */
+.navbar {
+    background-color: #2c2c2c; /* Dark gray */
+    padding: 1rem;
+}
+
+.navbar-brand {
+    color: #fff;
+    font-weight: bold;
+    text-decoration: none;
+}
+
+.nav-link {
+    color: #ccc;
+    transition: color 0.3s;
+}
+
+.nav-link:hover, .nav-link.active {
+    color: #fff;
+}
+
+.username-nav {
+    color: #fff;
+}
+
+.btn-red {
+    background-color: #e50914; /* Red accent */
+    color: #fff;
+    border: none;
+    padding: 0.5rem 1rem;
+}
+
+.btn-red:hover {
+    background-color: #f40612;
+    color: #fff;
+}
+
+.dropdown-menu {
+    background-color: #2c2c2c;
+    border: none;
+}
+
+.dropdown-item {
+    color: #ccc;
+}
+
+.dropdown-item:hover {
+    background-color: #444;
+    color: #fff;
+}
+
+/* Container */
+.container {
+    max-width: 1200px;
+    padding: 0 15px;
+}
+
+/* Section Titles */
+.section-title {
+    color: #fff;
+    margin-bottom: 1rem;
+    font-size: 1.5rem;
+}
+
+/* Scroll Container */
+.scroll-container {
+    overflow-x: auto;
+    white-space: nowrap;
+    padding-bottom: 1rem;
+    -webkit-overflow-scrolling: touch; /* Smooth scrolling on mobile */
+}
+.scroll-container::-webkit-scrollbar {
+    display: none;
+}
+
+/* Grid Container */
+.grid-container {
+    display: inline-flex;
+    gap: 1rem;
+}
+
+.grid-item {
+    position: relative;
+    width: 200px;
+    flex-shrink: 0;
+}
+
+.grid-item img {
+    width: 100%;
+    height: auto;
+    border-radius: 5px;
+}
+
+/* Overlay */
+.overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    opacity: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    transition: opacity 0.3s;
+    border-radius: 5px;
+    z-index: 1; /* Lower than interactive elements */
+    pointer-events: none; /* Allows clicks to pass through */
+}
+.grid-item:hover .overlay {
+    opacity: 1;
+}
+
+.rating {
+    color: #ffd700; /* Gold */
+    font-size: 1.2rem;
+}
+
+.title {
+    color: #fff;
+    font-size: 1rem;
+    text-align: center;
+    margin: 0.5rem 0;
+    padding: 0 5px;
+}
+
+.play-btn {
+    display: inline-block;
+    padding: 0.5rem 1rem;
+    background-color: #e50914;
+    color: #fff;
+    border-radius: 5px;
+    text-decoration: none;
+    font-size: 0.9rem;
+}
+
+/* Modal */
+.sign-box {
+    background-color: #2c2c2c;
+    color: #fff;
+}
+
+.modal-header, .modal-footer {
+    border-color: #444;
+}
+
+.form-control {
+    background-color: #333;
+    color: #fff;
+    border-color: #444;
+}
+
+.form-control::placeholder {
+    color: #aaa;
+}
+
+/* Watchlist Specific */
+.card {
+    background-color: #333;
+    border: none;
+    border-radius: 5px;
+}
+
+.card-img-top {
+    width: 100%;
+    height: auto;
+    border-top-left-radius: 5px;
+    border-top-right-radius: 5px;
+}
+
+.card-body {
+    padding: 1rem;
+}
+
+.card-title {
+    color: #fff;
+    font-size: 1.1rem;
+    margin-bottom: 0.5rem;
+}
+
+.btn-primary {
+    background-color: #007bff;
+    border: none;
+}
+
+.btn-primary:hover {
+    background-color: #0056b3;
+}
+
+.btn-danger {
+    background-color: #dc3545;
+    border: none;
+}
+
+.btn-danger:hover {
+    background-color: #b02a37;
+}
+
+
+/* Search Form */
+.input-group .form-control {
+    border-radius: 5px 0 0 5px;
+}
+
+.input-group .btn-red {
+    border-radius: 0 5px 5px 0;
+}
+
+/* Responsive Adjustments */
+@media (max-width: 768px) {
+    .grid-item {
+        width: 150px;
+    }
+
+    .section-title {
+        font-size: 1.25rem;
+    }
+
+    .navbar {
+        padding: 0.5rem;
+    }
+}
+
+@media (max-width: 576px) {
+    .grid-item {
+        width: 120px;
+    }
+
+    .rating {
+        font-size: 1rem;
+    }
+
+    .title {
+        font-size: 0.9rem;
+    }
+
+    .play-btn {
+        padding: 0.4rem 0.8rem;
+        font-size: 0.8rem;
+    }
+}
+
+.btn-review {
+    background-color: #e50914;
+    color: #fff;
+    border: none;
+}
+
+.btn-review:hover {
+    background-color: #f40612;
+}
+
+.btn-favorite.active {
+    background-color: #007bff;
+    color: #fff;
+    border-color: #007bff;
+}
+
+
+.status-select, .btn-remove-watchlist {
+    position: relative;
+    z-index: 2; /* Above overlay */
+    margin-top: 10px;
+    width: 100%;
+}/* Access Denied Message */
+.access-denied {
+    background-color: #2c2c2c; /* Matches navbar and sign-box */
+    color: #fff; /* White text like navbar */
+    padding: 2rem;
+    border-radius: 5px;
+    margin-top: 5rem; /* Matches mt-5 */
+}
+
+.access-denied h4 {
+    color: #fff; /* Matches navbar-brand */
+    font-size: 1.5rem; /* Matches section-title */
+    margin-bottom: 1rem;
+}
+
+.access-denied p {
+    color: #ccc; /* Matches nav-link default */
+    font-size: 1rem;
+}
+
+.access-link {
+    color: #e50914; /* Matches btn-red */
+    text-decoration: none;
+    transition: color 0.3s; /* Matches nav-link */
+}
+
+.access-link:hover {
+    color: #f40612; /* Matches btn-red:hover */
+    text-decoration: underline;
+}
+
+=== /opt/lampp/htdocs/iwatch/favorites.php ===
+<?php
+session_start();
+require "config.php";
+
+if (!isset($_SESSION["logged_in"]) || !$_SESSION["logged_in"]) {
+    header("Location: index.php");
+    exit();
+}
+
+$user_id = $_SESSION["user_id"];
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Favorites - iWatch</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <?php include 'navbar.php'; ?>
+
+    <div class="container mt-4">
+        <h1>My Favorites</h1>
+        <div class="row row-cols-1 row-cols-md-3 g-4">
+            <?php
+            $stmt = mysqli_prepare($conn, "SELECT media_id, media_type FROM favorites WHERE user_id = ?");
+            mysqli_stmt_bind_param($stmt, "i", $user_id);
+            mysqli_stmt_execute($stmt);
+            $result = mysqli_stmt_get_result($stmt);
+            $favorites = mysqli_fetch_all($result, MYSQLI_ASSOC);
+            mysqli_stmt_close($stmt);
+
+            if (empty($favorites)) {
+                echo '<p>No favorites yet. </p><br><p>Add some from the Movies or TV Series pages!</p>';
+            } else {
+                foreach ($favorites as $favorite) {
+                    $media_id = $favorite['media_id'];
+                    $media_type = $favorite['media_type'];
+                    $url = "https://api.themoviedb.org/3/" . ($media_type === 'movie' ? 'movie' : 'tv') . "/$media_id?api_key=$tmdb_api_key&language=en-US";
+                    $response = getCachedApiResponse($url);
+                    $data = json_decode($response, true);
+
+                    if ($data) {
+                        echo '<div class="col">';
+                        echo '<div class="card">';
+                        echo '<img src="https://image.tmdb.org/t/p/w500' . htmlspecialchars($data['poster_path'] ?? '') . '" class="card-img-top" alt="' . htmlspecialchars($data['title'] ?? $data['name']) . '">';
+                        echo '<div class="card-body">';
+                        echo '<h5 class="card-title">' . htmlspecialchars($data['title'] ?? $data['name']) . '</h5>';
+                        echo '<p class="card-text">' . ($media_type === 'movie' ? 'Release Date: ' : 'First Air Date: ') . htmlspecialchars($data['release_date'] ?? $data['first_air_date']) . '</p>';
+                        echo '<p class="card-text">Rating: ' . htmlspecialchars($data['vote_average'] ?? 0) . '</p>';
+                        echo '</div>';
+                        echo '</div>';
+                        echo '</div>';
+                    }
+                }
+            }
+            ?>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
+
+=== /opt/lampp/htdocs/iwatch/profile.php ===
+<?php
+session_start();
+require "config.php";
+
+if (!isset($_SESSION["logged_in"]) || !$_SESSION["logged_in"]) {
+    header("Location: index.php");
+    exit;
+}
+
+if (!isset($conn) || !$conn) {
+    die("Database connection failed.");
+}
+
+// Fetch user details
+$stmt = $conn->prepare("SELECT username, email FROM users WHERE id = ?");
+$stmt->bind_param("i", $_SESSION["user_id"]);
+$stmt->execute();
+$users = $stmt->get_result()->fetch_assoc();
+$stmt->close();
+
+// Fetch user's reviews
+$stmt = $conn->prepare("SELECT * FROM reviews WHERE user_id = ? ORDER BY created_at DESC");
+$stmt->bind_param("i", $_SESSION["user_id"]);
+$stmt->execute();
+$reviews = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+$stmt->close();
+
+// Prepare titles and posters for reviews
+$reviewData = [];
+foreach ($reviews as $review) {
+    $media_id = $review['media_id'];
+    $media_type = $review['media_type'];
+    $url = "https://api.themoviedb.org/3/" . ($media_type == "movie" ? "movie" : "tv") . "/" . $media_id . "?api_key=$tmdb_api_key";
+    $response = getCachedApiResponse($url);
+    $data = json_decode($response, true);
+    $title = $data["title"] ?? $data["name"] ?? "Unknown";
+    $poster = $data["poster_path"] ? "https://image.tmdb.org/t/p/w500" . $data["poster_path"] : "https://via.placeholder.com/200x300?text=No+Poster";
+    $rating = isset($data["vote_average"]) ? $data["vote_average"] : "N/A";
+    $reviewData[$media_id] = [
+        'title' => $title,
+        'poster' => $poster,
+        'review_text' => $review['review_text'],
+        'created_at' => $review['created_at'],
+        'media_type' => $media_type,
+        'rating' => $rating
+    ];
+}
+
+// Fetch user's favorites
+$stmt = $conn->prepare("SELECT media_id, media_type FROM favorites WHERE user_id = ? ORDER BY created_at DESC");
+$stmt->bind_param("i", $_SESSION["user_id"]);
+$stmt->execute();
+$favorites = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+$stmt->close();
+
+// Prepare titles and posters for favorites
+$favoriteData = [];
+foreach ($favorites as $favorite) {
+    $media_id = $favorite['media_id'];
+    $media_type = $favorite['media_type'];
+    $url = "https://api.themoviedb.org/3/" . ($media_type == "movie" ? "movie" : "tv") . "/" . $media_id . "?api_key=$tmdb_api_key";
+    $response = getCachedApiResponse($url);
+    $data = json_decode($response, true);
+    $title = $data["title"] ?? $data["name"] ?? "Unknown";
+    $poster = $data["poster_path"] ? "https://image.tmdb.org/t/p/w500" . $data["poster_path"] : "https://via.placeholder.com/200x300?text=No+Poster";
+    $rating = isset($data["vote_average"]) ? $data["vote_average"] : "N/A";
+    $favoriteData[$media_id] = [
+        'title' => $title,
+        'poster' => $poster,
+        'rating' => $rating,
+        'media_type' => $media_type
+    ];
+}
+?>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>iWatch - Profile</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="styles.css" rel="stylesheet">
+    <style>
+        .content-box {
+            background-color: rgb(35, 44, 53);
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .section-title {
+            color: #dc3545;
+            margin-bottom: 10px;
+        }
+        .review-text {
+            color: #ccc;
+            font-size: 0.9rem;
+            margin-top: 10px;
+            word-wrap: break-word;
+        }
+        .review-date {
+            color: #aaa;
+            font-size: 0.8rem;
+            margin-top: 5px;
+        }
+        .vertical-grid-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 1rem;
+            max-width: 100%;
+        }
+        .toggle-btn {
+            background-color: #e50914;
+            color: #fff;
+            border: none;
+            padding: 0.5rem 1rem;
+            margin-right: 10px;
+            transition: background-color 0.3s;
+        }
+        .toggle-btn:hover {
+            background-color: #f40612;
+        }
+        .toggle-btn.active {
+            background-color: #007bff;
+        }
+        #content-area {
+            transition: opacity 0.3s ease;
+        }
+    </style>
+</head>
+<body>
+<?php include 'navbar.php'; ?>
+
+    <div class="container mt-4">
+        <h2 class="section-title"><strong>Profile</strong></h2>
+        <div class="content-box">
+            <p><strong>Username:</strong> <?php echo htmlspecialchars($users["username"]); ?></p>
+            <br><p><strong>Email:</strong> <?php echo htmlspecialchars($users["email"]); ?></p>
+        </div>
+
+        <div class="mt-4">
+            <button id="show-favorites" class="toggle-btn active">Show Favorites</button>
+            <button id="show-reviews" class="toggle-btn">Show Reviews</button>
+        </div>
+
+        <div id="content-area" class="mt-4">
+            <div id="favorites-content" class="vertical-grid-container">
+                <?php if (empty($favorites)): ?>
+                    <p>No favorites yet.</p>
+                <?php else: ?>
+                    <?php foreach ($favoriteData as $media_id => $favorite): ?>
+                        <div class="grid-item">
+                            <a href="<?php echo ($favorite['media_type'] == 'movie') ? 'moviedetails.php' : 'seriesdetails.php'; ?>?id=<?php echo $media_id; ?>">
+                                <img src="<?php echo $favorite['poster']; ?>" alt="<?php echo htmlspecialchars($favorite['title']); ?>" loading="lazy">
+                                <div class="overlay">
+                                    <div class="rating"><?php echo $favorite['rating']; ?>/10</div>
+                                    <div class="title"><?php echo htmlspecialchars($favorite['title']); ?></div>
+                                    <span class="play-btn">Play</span>
+                                </div>
+                            </a>
+                        </div>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+            </div>
+
+            <div id="reviews-content" class="vertical-grid-container" style="display: none;">
+                <?php if (empty($reviews)): ?>
+                    <p>No reviews yet.</p>
+                <?php else: ?>
+                    <?php foreach ($reviewData as $media_id => $review): ?>
+                        <div class="grid-item">
+                            <a href="<?php echo ($review['media_type'] == 'movie') ? 'moviedetails.php' : 'seriesdetails.php'; ?>?id=<?php echo $media_id; ?>">
+                                <img src="<?php echo $review['poster']; ?>" alt="<?php echo htmlspecialchars($review['title']); ?>" loading="lazy">
+                                <div class="overlay">
+                                    <div class="rating"><?php echo $review['rating']; ?>/10</div>
+                                    <div class="title"><?php echo htmlspecialchars($review['title']); ?></div>
+                                    <span class="play-btn">Play</span>
+                                </div>
+                            </a>
+                            <div class="review-text"><?php echo htmlspecialchars($review['review_text']); ?></div>
+                            <div class="review-date"><?php echo date('F j, Y', strtotime($review['created_at'])); ?></div>
+                        </div>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="script.js"></script>
+    <script>
+        const showFavoritesBtn = document.getElementById('show-favorites');
+        const showReviewsBtn = document.getElementById('show-reviews');
+        const favoritesContent = document.getElementById('favorites-content');
+        const reviewsContent = document.getElementById('reviews-content');
+        const contentArea = document.getElementById('content-area');
+
+        function toggleContent(showFavorites) {
+            contentArea.style.opacity = '0';
+            setTimeout(() => {
+                if (showFavorites) {
+                    favoritesContent.style.display = 'grid';
+                    reviewsContent.style.display = 'none';
+                    showFavoritesBtn.classList.add('active');
+                    showReviewsBtn.classList.remove('active');
+                } else {
+                    favoritesContent.style.display = 'none';
+                    reviewsContent.style.display = 'grid';
+                    showFavoritesBtn.classList.remove('active');
+                    showReviewsBtn.classList.add('active');
+                }
+                contentArea.style.opacity = '1';
+            }, 300);
+        }
+
+        showFavoritesBtn.addEventListener('click', () => toggleContent(true));
+        showReviewsBtn.addEventListener('click', () => toggleContent(false));
+
+        // Initial state
+        toggleContent(true);
+    </script>
+</body>
+</html>
+
+=== /opt/lampp/htdocs/iwatch/moviedetails.php ===
+<?php
+session_start();
+require "config.php";
+
+$id = isset($_GET["id"]) ? intval($_GET["id"]) : 0;
+if ($id <= 0) {
+    header("Location: index.php");
+    exit;
+}
+
+// Fetch movie details
+$url = "https://api.themoviedb.org/3/movie/$id?api_key=$tmdb_api_key";
+$response = getCachedApiResponse($url);
+$movie = json_decode($response, true);
+
+// Fetch cast (credits)
+$castUrl = "https://api.themoviedb.org/3/movie/$id/credits?api_key=$tmdb_api_key";
+$castResponse = getCachedApiResponse($castUrl);
+$castData = json_decode($castResponse, true);
+
+// Check if movie exists and handle errors
+if (isset($movie["status_code"])) {
+    $error = $movie["status_message"] ?? "An error occurred while fetching movie details.";
+} elseif (!$movie || empty($movie["title"])) {
+    $error = "Movie not found.";
+}
+
+// Check favorites and watchlist status
+$isFavorited = false;
+$watchlistStatus = null;
+if (isset($_SESSION["logged_in"]) && $_SESSION["logged_in"] === true && isset($_SESSION["user_id"])) {
+    $user_id = (int)$_SESSION["user_id"];
+    
+    $stmt = $conn->prepare("SELECT COUNT(*) FROM favorites WHERE user_id = ? AND media_id = ? AND media_type = 'movie'");
+    $stmt->bind_param("ii", $user_id, $id);
+    $stmt->execute();
+    $isFavorited = $stmt->get_result()->fetch_row()[0] > 0;
+    $stmt->close();
+
+    $stmt = $conn->prepare("SELECT status FROM watchlist WHERE user_id = ? AND media_id = ? AND media_type = 'movie'");
+    $stmt->bind_param("ii", $user_id, $id);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    if ($row = $result->fetch_assoc()) {
+        $watchlistStatus = $row['status'];
+    }
+    $stmt->close();
+}
+?>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>iWatch - <?php echo htmlspecialchars($movie["title"] ?? "Movie Details"); ?></title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="styles.css" rel="stylesheet">
+</head>
+<body>
+<?php include 'navbar.php'; ?>
+
+<div class="container mt-4">
+    <h2 class="section-title">MOVIE DETAILS</h2>
+    <div class="content-box">
+        <?php if (isset($error)): ?>
+            <div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div>
+        <?php else: ?>
+            <div class="row">
+                <div class="col-md-4">
+                    <img src="<?php echo $movie["poster_path"] ? 'https://image.tmdb.org/t/p/w500' . $movie["poster_path"] : 'https://via.placeholder.com/300x450?text=No+Poster'; ?>" 
+                         alt="<?php echo htmlspecialchars($movie["title"]); ?>" 
+                         class="poster img-fluid" 
+                         loading="lazy">
+                </div>
+                <div class="col-md-8 details">
+                    <h2><?php echo htmlspecialchars($movie["title"]); ?> (<?php echo htmlspecialchars(substr($movie["release_date"] ?? '', 0, 4)); ?>)</h2>
+                    <p><strong>Rating:</strong> <?php echo htmlspecialchars($movie["vote_average"] ?? 'N/A'); ?>/10 (<?php echo htmlspecialchars($movie["vote_count"] ?? '0'); ?> votes)</p>
+                    <p><strong>Release Date:</strong> <?php echo htmlspecialchars($movie["release_date"] ?? 'N/A'); ?></p>
+                    <div class="genres">
+                        <?php foreach ($movie["genres"] ?? [] as $genre): ?>
+                            <span class="badge bg-secondary me-1"><?php echo htmlspecialchars($genre["name"]); ?></span>
+                        <?php endforeach; ?>
+                    </div>
+                    <p><strong>Overview:</strong> <?php echo htmlspecialchars($movie["overview"] ?? 'No overview available'); ?></p>
+                    <p><strong>Runtime:</strong> <?php echo isset($movie["runtime"]) ? htmlspecialchars(floor($movie["runtime"] / 60)) . 'h ' . ($movie["runtime"] % 60) . 'm' : 'N/A'; ?></p>
+                    
+                    <div class="cast">
+                        <h4>Cast</h4>
+                        <p>
+                            <?php
+                            $cast = array_slice($castData["cast"] ?? [], 0, 5);
+                            $castNames = array_map(function($actor) { 
+                                return htmlspecialchars($actor["name"]) . ' as ' . htmlspecialchars($actor["character"]); 
+                            }, $cast);
+                            echo implode(", ", $castNames) ?: 'No cast information available';
+                            ?>
+                        </p>
+                    </div>
+
+                    <div class="action-buttons mt-3">
+                        <a href="#" class="btn btn-red me-2">Watch Now</a>
+                        <?php if (isset($_SESSION["logged_in"]) && $_SESSION["logged_in"] === true): ?>
+                            <button class="btn btn-outline-primary btn-favorite <?php echo $isFavorited ? 'active' : ''; ?>" 
+                                    data-media-id="<?php echo $id; ?>" 
+                                    data-media-type="movie">
+                                <?php echo $isFavorited ? 'Favorited' : 'Add to Favorites'; ?>
+                            </button>
+                            <select class="form-select d-inline-block w-auto me-2 btn-watchlist-status" 
+                                    data-media-id="<?php echo $id; ?>" 
+                                    data-media-type="movie">
+                                <option value="" <?php echo !$watchlistStatus ? 'selected' : ''; ?>>
+                                    <?php echo $watchlistStatus === null ? 'Add to Watchlist' : 'Remove from Watchlist'; ?>
+                                </option>
+                                <option value="planned" <?php echo $watchlistStatus === 'planned' ? 'selected' : ''; ?>>Planned</option>
+                                <option value="watching" <?php echo $watchlistStatus === 'watching' ? 'selected' : ''; ?>>Watching</option>
+                                <option value="completed" <?php echo $watchlistStatus === 'completed' ? 'selected' : ''; ?>>Completed</option>
+                            </select>
+                        <?php endif; ?>
+                    </div>
+
+                    <?php if (isset($_SESSION["logged_in"]) && $_SESSION["logged_in"] === true): ?>
+                        <div class="review-section mt-4">
+                            <h3>Leave a Review</h3>
+                            <form id="reviewFormMovie" class="needs-validation" novalidate>
+                                <div class="mb-3">
+                                    <textarea name="review_text" 
+                                              class="form-control" 
+                                              placeholder="Write your review here" 
+                                              required 
+                                              minlength="10" 
+                                              maxlength="500"></textarea>
+                                    <div class="invalid-feedback">
+                                        Review must be between 10 and 500 characters.
+                                    </div>
+                                </div>
+                                <input type="hidden" name="media_id" value="<?php echo $id; ?>">
+                                <input type="hidden" name="media_type" value="movie">
+                                <button type="submit" class="btn btn-review">Submit Review</button>
+                            </form>
+                        </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+        <?php endif; ?>
+    </div>
+
+    <?php include 'modals.php'; ?>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="script.js?v=<?php echo filemtime('script.js'); ?>"></script>
+</body>
+</html>
+
+=== /opt/lampp/htdocs/iwatch/movies.php ===
+<?php
+session_start();
+require "config.php";
+?>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Movies - iWatch</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="styles.css" rel="stylesheet">
+</head>
+<body>
+<?php include 'navbar.php'; ?>
+
+    <div class="container mt-4">
+        <h2 class="section-title">Popular Movies</h2>
+        <div class="scroll-container">
+            <div class="grid-container">
+                <?php
+                $url = "https://api.themoviedb.org/3/movie/popular?api_key=" . TMDB_API_KEY;
+                $response = getCachedApiResponse($url);
+                $movies = json_decode($response, true)["results"] ?? [];
+                foreach ($movies as $movie) {
+                    $poster = $movie["poster_path"] ? "https://image.tmdb.org/t/p/w500" . $movie["poster_path"] : "https://via.placeholder.com/200x300?text=No+Poster";
+                    $rating = isset($movie["vote_average"]) ? htmlspecialchars($movie["vote_average"]) : "N/A";
+                    $title = htmlspecialchars($movie["title"]);
+                    echo '<div class="grid-item">';
+                    echo '<a href="moviedetails.php?id=' . $movie["id"] . '">';
+                    echo '<img src="' . $poster . '" alt="' . $title . '" loading="lazy">';
+                    echo '<div class="overlay">';
+                    echo '<div class="rating">' . $rating . '/10</div>';
+                    echo '<div class="title">' . $title . '</div>';
+                    echo '<span class="play-btn">Play</span>';
+                    echo '</div>';
+                    echo '</a>';
+                    echo '</div>';
+                }
+                ?>
+            </div>
+        </div>
+
+        <h2 class="section-title">Top Rated Movies</h2>
+        <div class="scroll-container">
+            <div class="grid-container">
+                <?php
+                $url = "https://api.themoviedb.org/3/movie/top_rated?api_key=" . TMDB_API_KEY;
+                $response = getCachedApiResponse($url);
+                $topMovies = json_decode($response, true)["results"] ?? [];
+                foreach ($topMovies as $movie) {
+                    $poster = $movie["poster_path"] ? "https://image.tmdb.org/t/p/w500" . $movie["poster_path"] : "https://via.placeholder.com/200x300?text=No+Poster";
+                    $rating = isset($movie["vote_average"]) ? htmlspecialchars($movie["vote_average"]) : "N/A";
+                    $title = htmlspecialchars($movie["title"]);
+                    echo '<div class="grid-item">';
+                    echo '<a href="moviedetails.php?id=' . $movie["id"] . '">';
+                    echo '<img src="' . $poster . '" alt="' . $title . '" loading="lazy">';
+                    echo '<div class="overlay">';
+                    echo '<div class="rating">' . $rating . '/10</div>';
+                    echo '<div class="title">' . $title . '</div>';
+                    echo '<span class="play-btn">Play</span>';
+                    echo '</div>';
+                    echo '</a>';
+                    echo '</div>';
+                }
+                ?>
+            </div>
+        </div>
+
+        <?php include 'modals.php'; ?>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
+

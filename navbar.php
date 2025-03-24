@@ -30,7 +30,7 @@
                         </a>
                         <ul class="dropdown-menu" aria-labelledby="accountDropdown">
                             <li><a class="dropdown-item" href="profile.php">Profile</a></li>
-                            <li><a class="dropdown-item" href="watchlist.php">Watchlist</a></li>
+                            <li><hr class="dropdown-divider"></li>
                             <li><a class="dropdown-item" href="logout.php">Log Out</a></li>
                         </ul>
                     </li>

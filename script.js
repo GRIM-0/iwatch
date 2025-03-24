@@ -1,7 +1,7 @@
 document.addEventListener('DOMContentLoaded', () => {
     console.log('DOMContentLoaded fired - script.js fully loaded');
 
-    // Navbar functionality
+    // Navbar functionality (unchanged)
     const navbarToggler = document.querySelector('.navbar-toggler');
     const navbar = document.querySelector('.navbar');
 
@@ -30,6 +30,66 @@ document.addEventListener('DOMContentLoaded', () => {
         adjustLayout();
     }
 
+    // Client-side validation for signup form
+    function validateSignUpForm(form) {
+        let isValid = true;
+
+        // Get form elements
+        const usernameInput = form.querySelector('#signUpUsername');
+        const emailInput = form.querySelector('#signUpEmail');
+        const passwordInput = form.querySelector('#signUpPassword');
+        const usernameFeedback = form.querySelector('#usernameFeedback');
+        const emailFeedback = form.querySelector('#emailFeedback');
+        const passwordFeedback = form.querySelector('#passwordFeedback');
+
+        // Reset feedback
+        usernameInput.classList.remove('is-invalid');
+        emailInput.classList.remove('is-invalid');
+        passwordInput.classList.remove('is-invalid');
+        if (usernameFeedback) usernameFeedback.textContent = '';
+        if (emailFeedback) emailFeedback.textContent = '';
+        if (passwordFeedback) passwordFeedback.textContent = '';
+
+        // Validate username (max 25 characters)
+        const username = usernameInput.value.trim();
+        if (username.length === 0) {
+            usernameInput.classList.add('is-invalid');
+            if (usernameFeedback) usernameFeedback.textContent = 'Username is required.';
+            isValid = false;
+        } else if (username.length > 25) {
+            usernameInput.classList.add('is-invalid');
+            if (usernameFeedback) usernameFeedback.textContent = 'Username must not exceed 25 characters.';
+            isValid = false;
+        }
+
+        // Validate email
+        const email = emailInput.value.trim();
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (email.length === 0) {
+            emailInput.classList.add('is-invalid');
+            if (emailFeedback) emailFeedback.textContent = 'Email is required.';
+            isValid = false;
+        } else if (!emailRegex.test(email)) {
+            emailInput.classList.add('is-invalid');
+            if (emailFeedback) emailFeedback.textContent = 'Please enter a valid email address.';
+            isValid = false;
+        }
+
+        // Validate password (exactly 8 characters)
+        const password = passwordInput.value;
+        if (password.length === 0) {
+            passwordInput.classList.add('is-invalid');
+            if (passwordFeedback) passwordFeedback.textContent = 'Password is required.';
+            isValid = false;
+        } else if (password.length !== 8) {
+            passwordInput.classList.add('is-invalid');
+            if (passwordFeedback) passwordFeedback.textContent = 'Password must be exactly 8 characters long.';
+            isValid = false;
+        }
+
+        return isValid;
+    }
+
     // Generic form submission handler
     function handleFormSubmission(formId, url, successCallback) {
         const form = document.getElementById(formId);
@@ -37,7 +97,13 @@ document.addEventListener('DOMContentLoaded', () => {
             form.addEventListener('submit', async (e) => {
                 e.preventDefault();
 
-                if (!form.checkValidity()) {
+                // Validate form (for signup form, use custom validation)
+                if (formId === 'signUpForm') {
+                    if (!validateSignUpForm(form)) {
+                        form.classList.add('was-validated');
+                        return;
+                    }
+                } else if (!form.checkValidity()) {
                     e.stopPropagation();
                     form.classList.add('was-validated');
                     return;
@@ -72,14 +138,26 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Sign-up form
-    handleFormSubmission('signUpForm', '/iwatch/signup_handler.php', (form) => {
-        alert('Sign-up successful! Please sign in.');
+    handleFormSubmission('signUpForm', '/iwatch/signup_handler.php', (form, data) => {
+        alert('Sign-up successful! Please set your preferences.');
         form.closest('.modal').querySelector('.btn-close').click();
         form.reset();
         form.classList.remove('was-validated');
+        if (data.showPreferences) {
+            const preferencesModal = new bootstrap.Modal(document.getElementById('preferencesModal'));
+            preferencesModal.show();
+        }
     });
 
-    // Review forms
+    // Preferences form
+    handleFormSubmission('preferencesForm', '/iwatch/save_preferences.php', (form) => {
+        alert('Preferences saved successfully!');
+        form.closest('.modal').querySelector('.btn-close').click();
+        form.reset();
+        window.location.href = '/iwatch/index.php';
+    });
+
+    // Review forms (unchanged)
     const reviewSuccessCallback = (form) => {
         alert('Review submitted successfully!');
         form.reset();
@@ -88,7 +166,7 @@ document.addEventListener('DOMContentLoaded', () => {
     handleFormSubmission('reviewFormMovie', '/iwatch/reviews_handler.php', reviewSuccessCallback);
     handleFormSubmission('reviewFormSeries', '/iwatch/reviews_handler.php', reviewSuccessCallback);
 
-    // Favorite button handler
+    // Favorite button handler (unchanged)
     document.querySelectorAll('.btn-favorite').forEach(button => {
         button.addEventListener('click', async (e) => {
             e.preventDefault();
@@ -132,7 +210,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // Watchlist handlers
+    // Watchlist handlers (unchanged)
     console.log('Searching for .btn-watchlist-status elements');
     document.querySelectorAll('.btn-watchlist-status').forEach(select => {
         select.addEventListener('change', async () => {
@@ -208,7 +286,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // Search and genre functionality
+    // Search and genre functionality (unchanged)
     const searchForm = document.getElementById('searchForm');
     const searchInput = document.querySelector('input[name="query"]');
     const selectedGenresInput = document.getElementById('selectedGenresInput');
@@ -229,7 +307,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (selectedGenresInput && selectedGenresContainer) {
         document.querySelectorAll('.genre-item').forEach(item => {
             item.addEventListener('click', (e) => {
-                e.preventDefault(); // Prevent default anchor behavior
+                e.preventDefault();
                 const genreId = item.dataset.genreId;
                 let genresArray = selectedGenresInput.value ? selectedGenresInput.value.split(',').filter(Boolean) : [];
 
@@ -242,7 +320,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     genreBadge.innerHTML = `${item.textContent} <button type="button" class="btn-close btn-close-white remove-genre ms-2" data-genre-id="${genreId}"></button>`;
                     selectedGenresContainer.appendChild(genreBadge);
 
-                    searchForm.submit(); // Trigger search immediately
+                    searchForm.submit();
                 }
             });
         });
@@ -253,7 +331,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 let genresArray = selectedGenresInput.value.split(',').filter(g => g !== genreIdToRemove);
                 selectedGenresInput.value = genresArray.join(',');
                 event.target.parentElement.remove();
-                searchForm.submit(); // Trigger search on removal
+                searchForm.submit();
             }
         });
 
@@ -261,9 +339,31 @@ document.addEventListener('DOMContentLoaded', () => {
             clearGenresBtn.addEventListener('click', () => {
                 selectedGenresInput.value = '';
                 selectedGenresContainer.innerHTML = '';
-                searchForm.submit(); // Trigger search on clear
+                searchForm.submit();
             });
         }
     }
-    
+
+    // Trailer modal handler
+    document.querySelectorAll('.btn-watch-trailer').forEach(button => {
+        button.addEventListener('click', (e) => {
+            e.preventDefault();
+            const trailerUrl = button.getAttribute('data-trailer-url');
+            const iframe = document.getElementById('trailerIframe');
+            if (trailerUrl && iframe) {
+                iframe.src = trailerUrl.replace("watch?v=", "embed/") + "?autoplay=1";
+            }
+        });
+    });
+
+    // Reset iframe src when modal is closed to stop the video
+    const trailerModal = document.getElementById('trailerModal');
+    if (trailerModal) {
+        trailerModal.addEventListener('hidden.bs.modal', () => {
+            const iframe = document.getElementById('trailerIframe');
+            if (iframe) {
+                iframe.src = '';
+            }
+        });
+    }
 });

@@ -1,9 +1,5 @@
 <?php
 function signIn($conn) {
-    if ($_SERVER["REQUEST_METHOD"] !== "POST" || !isset($_POST["signInSubmit"])) {
-        return "Invalid request.";
-    }
-
     $username = trim($_POST["username"] ?? '');
     $password = trim($_POST["password"] ?? '');
 
@@ -29,7 +25,7 @@ function signIn($conn) {
     if ($user && password_verify($password, $user['password'])) {
         $_SESSION["logged_in"] = true;
         $_SESSION["username"] = $user['username'];
-        $_SESSION["user_id"] = $user['id']; // Add user_id to session
+        $_SESSION["user_id"] = $user['id'];
         error_log("Sign-in successful for user: $username");
         return false;
     } else {
